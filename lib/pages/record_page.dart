@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class RecordPage extends StatefulWidget {
   const RecordPage({super.key});
@@ -59,23 +60,47 @@ class _RecordPageState extends State<RecordPage> {
   // 3. Function to Stop Recording
   Future<void> _stopRecording() async {
     try {
+      // 1. Stop recording locally
       final path = await _audioRecorder.stop();
+      if (path == null) return;
 
       setState(() {
         _isRecording = false;
+        _audioPath = path;
       });
-      print("Recording stopped. Saved to: $path");
       
+      print("Local file saved at: $path");
+
+      // 2. Upload to Supabase
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Recording saved! Path: $path')),
+          const SnackBar(content: Text('Uploading to Cloud... Please wait.')),
         );
       }
+
+      final file = File(path);
+      final fileName = 'lecture_${DateTime.now().millisecondsSinceEpoch}.m4a';
+
+      // The Magic Line: Uploads file to "lectures" bucket
+      await Supabase.instance.client.storage
+          .from('lectures')
+          .upload(fileName, file);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Upload Successful! Saved to Cloud.')),
+        );
+      }
+      
     } catch (e) {
-      print("Error stopping record: $e");
+      print("Error uploading: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Upload Failed: $e'), backgroundColor: Colors.red),
+        );
+      }
     }
   }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
