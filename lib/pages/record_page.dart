@@ -83,7 +83,7 @@ class _RecordPageState extends State<RecordPage> {
 
       // The Magic Line: Uploads file to "lectures" bucket
       await Supabase.instance.client.storage
-          .from('lectures')
+          .from('Lectures')
           .upload(fileName, file);
 
       if (mounted) {
