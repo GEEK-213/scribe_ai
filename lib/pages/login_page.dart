@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
+import 'home_page.dart';
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
 
@@ -32,7 +32,10 @@ class _LoginPageState extends State<LoginPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Login Successful!')),
         );
-        // TODO: Navigate to Home Page later
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const HomePage()),
+        );
       }
     } on AuthException catch (error) {
       // Logic: If Supabase says "Wrong password", tell the user

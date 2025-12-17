@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:scribe_ai/pages/home_page.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:scribe_ai/pages/login_page.dart';
 
@@ -23,7 +24,10 @@ class MyApp extends StatelessWidget {
       title: 'ScribeAI',
       theme: ThemeData(primarySwatch: Colors.blue),
       
-      home: const LoginPage(), 
+      home: Supabase.instance.client.auth.currentUser == null
+    ? const LoginPage()
+    : const HomePage(),
+
     );
   }
 }
