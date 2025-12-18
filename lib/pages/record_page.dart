@@ -58,7 +58,7 @@ class _RecordPageState extends State<RecordPage> {
   }
 
   // 3. Function to Stop Recording
-  Future<void> _stopRecording() async {
+ Future<void> _stopRecording() async {
     try {
       // 1. Stop recording locally
       final path = await _audioRecorder.stop();
@@ -68,35 +68,44 @@ class _RecordPageState extends State<RecordPage> {
         _isRecording = false;
         _audioPath = path;
       });
-      
-      print("Local file saved at: $path");
 
-      // 2. Upload to Supabase
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Uploading to Cloud... Please wait.')),
+          const SnackBar(content: Text('Uploading to Cloud...')),
         );
       }
 
+      // 2. Upload File to Storage
       final file = File(path);
-      final fileName = 'lecture_${DateTime.now().millisecondsSinceEpoch}.m4a';
+      // Create a clean filename (e.g., "1708842_lecture.m4a")
+      final fileName = '${DateTime.now().millisecondsSinceEpoch}_lecture.m4a';
 
-      // The Magic Line: Uploads file to "lectures" bucket
       await Supabase.instance.client.storage
           .from('Lectures')
           .upload(fileName, file);
 
+      // 3. Create Database Entry (The "Trigger")
+      final userId = Supabase.instance.client.auth.currentUser?.id;
+      
+      await Supabase.instance.client.from('notes').insert({
+        'title': 'New Lecture ${DateTime.now().hour}:${DateTime.now().minute}',
+        'audio_path': fileName,
+        'status': 'Processing', // This tells Python "Hey, work on this!"
+        'user_id': userId,
+      });
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Upload Successful! Saved to Cloud.')),
+          const SnackBar(content: Text('Saved! AI is analyzing...')),
         );
+        Navigator.pop(context); // Go back to Home
       }
       
     } catch (e) {
-      print("Error uploading: $e");
+      print("Error: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Upload Failed: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
         );
       }
     }
