@@ -1,8 +1,11 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:record/record.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:flutter_sound/flutter_sound.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'dart:io';
+import 'dart:async';
+import 'dart:ui';
+import '../theme/app_theme.dart';
 
 class RecordPage extends StatefulWidget {
   const RecordPage({super.key});
@@ -12,155 +15,187 @@ class RecordPage extends StatefulWidget {
 }
 
 class _RecordPageState extends State<RecordPage> {
-  // 1. Create the Audio Recorder instance
-  late final AudioRecorder _audioRecorder;
-  
-  // State variables
+  final FlutterSoundRecorder _recorder = FlutterSoundRecorder();
+  bool _isRecorderInitialized = false;
   bool _isRecording = false;
-  String? _audioPath; // To store where the file is saved
+  String? _recordedFilePath;
+  Stopwatch _stopwatch = Stopwatch();
+  Timer? _timer;
+  String _formattedTime = "00:00:00";
 
   @override
   void initState() {
     super.initState();
-    _audioRecorder = AudioRecorder();
+    _initRecorder();
+  }
+
+  Future<void> _initRecorder() async {
+    final status = await Permission.microphone.request();
+    if (status != PermissionStatus.granted) {
+      throw RecordingPermissionException('Microphone permission not granted');
+    }
+    await _recorder.openRecorder();
+    _isRecorderInitialized = true;
   }
 
   @override
   void dispose() {
-    _audioRecorder.dispose(); // Always clean up
+    _recorder.closeRecorder();
+    _timer?.cancel();
     super.dispose();
   }
 
-  // 2. Function to Start Recording
-  Future<void> _startRecording() async {
-    try {
-      // Check if we have permission
-      if (await _audioRecorder.hasPermission()) {
-        
-        // Get a safe location to save the file
-        final directory = await getApplicationDocumentsDirectory();
-        // Create a unique filename using the current time
-        final String filePath = '${directory.path}/lecture_${DateTime.now().millisecondsSinceEpoch}.m4a';
+  void _startTimer() {
+    _stopwatch.start();
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      setState(() {
+        final duration = _stopwatch.elapsed;
+        _formattedTime = 
+            "${duration.inHours.toString().padLeft(2, '0')}:"
+            "${(duration.inMinutes % 60).toString().padLeft(2, '0')}:"
+            "${(duration.inSeconds % 60).toString().padLeft(2, '0')}";
+      });
+    });
+  }
 
-        // Start recording to that file
-        await _audioRecorder.start(const RecordConfig(), path: filePath);
+  void _stopTimer() {
+    _stopwatch.stop();
+    _stopwatch.reset();
+    _timer?.cancel();
+    setState(() => _formattedTime = "00:00:00");
+  }
 
-        setState(() {
-          _isRecording = true;
-          _audioPath = filePath;
-        });
-        print("Recording started at: $filePath");
-      }
-    } catch (e) {
-      print("Error starting record: $e");
+  Future<void> _record() async {
+    if (!_isRecorderInitialized) return;
+    await _recorder.startRecorder(toFile: 'temp_audio.aac');
+    _startTimer();
+    setState(() => _isRecording = true);
+  }
+
+  Future<void> _stop() async {
+    if (!_isRecorderInitialized) return;
+    final path = await _recorder.stopRecorder();
+    _timer?.cancel(); // Pause timer visually
+    setState(() {
+      _isRecording = false;
+      _recordedFilePath = path;
+    });
+    
+    // Auto-upload logic (kept simple for UI demo)
+    if (_recordedFilePath != null) {
+      _uploadRecording(File(_recordedFilePath!));
     }
   }
 
-  // 3. Function to Stop Recording
- Future<void> _stopRecording() async {
+  Future<void> _uploadRecording(File file) async {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Saving Lecture...')));
+    
     try {
-      // 1. Stop recording locally
-      final path = await _audioRecorder.stop();
-      if (path == null) return;
+      final fileName = '${DateTime.now().millisecondsSinceEpoch}_rec.aac';
+      final userId = Supabase.instance.client.auth.currentUser!.id;
 
-      setState(() {
-        _isRecording = false;
-        _audioPath = path;
-      });
+      await Supabase.instance.client.storage.from('lectures').upload(fileName, file);
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Uploading to Cloud...')),
-        );
-      }
-
-      // 2. Upload File to Storage
-      final file = File(path);
-      // Create a clean filename (e.g., "1708842_lecture.m4a")
-      final fileName = '${DateTime.now().millisecondsSinceEpoch}_lecture.m4a';
-
-      await Supabase.instance.client.storage
-          .from('Lectures')
-          .upload(fileName, file);
-
-      // 3. Create Database Entry (The "Trigger")
-      final userId = Supabase.instance.client.auth.currentUser?.id;
-      
       await Supabase.instance.client.from('notes').insert({
-        'title': 'New Lecture ${DateTime.now().hour}:${DateTime.now().minute}',
+        'title': 'Lecture ${DateTime.now().hour}:${DateTime.now().minute}',
         'audio_path': fileName,
-        'status': 'Processing', // This tells Python "Hey, work on this!"
+        'status': 'Processing',
         'user_id': userId,
       });
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Saved! AI is analyzing...')),
-        );
-        Navigator.pop(context); // Go back to Home
+        Navigator.pop(context); // Go back to dashboard
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Lecture Saved!')));
       }
-      
     } catch (e) {
-      print("Error: $e");
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-        );
-      }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
     }
   }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Record Lecture')),
-      body: Center(
+      extendBodyBehindAppBar: true,
+      appBar: AppBar(
+        title: const Text("Recording Studio"),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: AppTheme.deepBlue),
+      ),
+      body: Container(
+        width: double.infinity,
+        decoration: const BoxDecoration(
+          gradient: AppTheme.mainGradient,
+        ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Status Text
-            Text(
-              _isRecording ? 'Recording...' : 'Tap Mic to Start',
-              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+            // 1. STATUS CARD
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              decoration: BoxDecoration(
+                color: _isRecording ? Colors.red.withOpacity(0.1) : Colors.blue.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(_isRecording ? Icons.fiber_manual_record : Icons.mic_none, 
+                       color: _isRecording ? Colors.red : AppTheme.primaryBlue, size: 20),
+                  const SizedBox(width: 8),
+                  Text(_isRecording ? "Recording in progress..." : "Ready to capture",
+                       style: TextStyle(color: _isRecording ? Colors.red : AppTheme.primaryBlue, fontWeight: FontWeight.bold)),
+                ],
+              ),
             ),
-            const SizedBox(height: 30),
             
-            // The Big Red Button
+            const SizedBox(height: 50),
+
+            // 2. GIANT TIMER
+            Text(
+              _formattedTime,
+              style: const TextStyle(
+                fontSize: 60, 
+                fontWeight: FontWeight.w200, 
+                color: AppTheme.deepBlue,
+                fontFeatures: [FontFeature.tabularFigures()], // Keeps numbers steady
+              ),
+            ),
+
+            const SizedBox(height: 80),
+
+            // 3. THE BIG BUTTON
             GestureDetector(
-              onTap: () {
-                if (_isRecording) {
-                  _stopRecording();
-                } else {
-                  _startRecording();
-                }
-              },
-              child: Container(
-                width: 100,
-                height: 100,
+              onTap: _isRecording ? _stop : _record,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                height: _isRecording ? 100 : 120,
+                width: _isRecording ? 100 : 120,
                 decoration: BoxDecoration(
-                  color: _isRecording ? Colors.red : Colors.blue,
                   shape: BoxShape.circle,
+                  color: _isRecording ? Colors.redAccent : AppTheme.primaryBlue,
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black26,
-                      blurRadius: 10,
-                      offset: const Offset(0, 5),
+                      color: _isRecording ? Colors.red.withOpacity(0.4) : Colors.blue.withOpacity(0.4),
+                      blurRadius: _isRecording ? 20 : 10,
+                      spreadRadius: _isRecording ? 10 : 2,
                     )
                   ],
                 ),
                 child: Icon(
-                  _isRecording ? Icons.stop : Icons.mic,
-                  color: Colors.white,
-                  size: 50,
+                  _isRecording ? Icons.stop : Icons.mic, 
+                  size: 50, 
+                  color: Colors.white
                 ),
               ),
             ),
             
-            const SizedBox(height: 20),
-            if (_audioPath != null)
-              Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Text("Last saved: $_audioPath", style: const TextStyle(fontSize: 10, color: Colors.grey)),
-              ),
+            const SizedBox(height: 30),
+            Text(
+              _isRecording ? "Tap to Finish" : "Tap to Start",
+              style: const TextStyle(color: Colors.grey, fontSize: 16),
+            ),
           ],
         ),
       ),
