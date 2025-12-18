@@ -26,7 +26,7 @@ async def process_new_uploads():
         print(f"🎤 Found new audio: {note['audio_path']}")
         try:
             # 1. Download Audio
-            audio_data = supabase.storage.from_('lectures').download(note['audio_path'])
+            audio_data = supabase.storage.from_('Lectures').download(note['audio_path'])
             temp_filename = f"temp_{note['id']}.mp3"
             with open(temp_filename, "wb") as f:
                 f.write(audio_data)

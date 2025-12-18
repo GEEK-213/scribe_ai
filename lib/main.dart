@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:scribe_ai/pages/home_page.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:scribe_ai/pages/login_page.dart';
+import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,7 +23,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'ScribeAI',
-      theme: ThemeData(primarySwatch: Colors.blue),
+      theme: AppTheme.lightTheme,
       
       home: Supabase.instance.client.auth.currentUser == null
     ? const LoginPage()

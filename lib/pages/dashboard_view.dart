@@ -4,6 +4,7 @@ import 'record_page.dart';
 import 'note_details_page.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:io';
+import '../theme/app_theme.dart';
 
 class DashboardView extends StatefulWidget {
   const DashboardView({super.key});
@@ -34,7 +35,7 @@ class _DashboardViewState extends State<DashboardView> {
 
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Uploading...')));
 
-      await Supabase.instance.client.storage.from('lectures').upload(fileName, file);
+      await Supabase.instance.client.storage.from('Lectures').upload(fileName, file);
 
       await Supabase.instance.client.from('notes').insert({
         'title': 'Upload ${DateTime.now().hour}:${DateTime.now().minute}',
@@ -48,117 +49,160 @@ class _DashboardViewState extends State<DashboardView> {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
     }
   }
-
-  @override
+@override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        // 1. FIXED HEADER
-        Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: Colors.blue.shade800,
-            borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(30), bottomRight: Radius.circular(30)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text("Welcome Back! 👋", style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 10),
-              const Text("Let's crush your studies today.", style: TextStyle(color: Colors.white70, fontSize: 14)),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  _buildStatCard("Lectures", "Checking...", Icons.mic),
-                  const SizedBox(width: 10),
-                  _buildStatCard("Avg Quiz", "85%", Icons.emoji_events),
-                ],
+    // 1. WRAP EVERYTHING IN A CONTAINER WITH GRADIENT
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: AppTheme.mainGradient, // <--- The "Ice & Water" Background
+      ),
+      child: Column(
+        children: [
+          // 2. HEADER (I kept it Blue for now, but added a shadow)
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: AppTheme.primaryBlue, // Used your Theme Color
+              borderRadius: const BorderRadius.only(
+                bottomLeft: Radius.circular(30),
+                bottomRight: Radius.circular(30)
               ),
-            ],
-          ),
-        ),
-        
-        const SizedBox(height: 15),
-
-        // 2. ACTION BUTTONS
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Row(
-            children: [
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const RecordPage())),
-                  icon: const Icon(Icons.mic),
-                  label: const Text("Record"),
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 12)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.blue.withOpacity(0.3),
+                  blurRadius: 10,
+                  offset: const Offset(0, 5),
+                )
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text("Welcome Back! 👋", style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 10),
+                const Text("Let's crush your studies today.", style: TextStyle(color: Colors.white70, fontSize: 14)),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    _buildStatCard("Lectures", "Checking...", Icons.mic),
+                    const SizedBox(width: 10),
+                    _buildStatCard("Avg Quiz", "85%", Icons.emoji_events),
+                  ],
                 ),
-              ),
-              const SizedBox(width: 15),
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: _pickAndUploadFile,
-                  icon: const Icon(Icons.upload_file),
-                  label: const Text("Upload"),
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black, padding: const EdgeInsets.symmetric(vertical: 12)),
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
+          
+          const SizedBox(height: 15),
 
-        const SizedBox(height: 10),
-
-        // 3. SCROLLING LIST
-        Expanded(
-          child: StreamBuilder<List<Map<String, dynamic>>>(
-            stream: _notesStream,
-            builder: (context, snapshot) {
-              if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-              final notes = snapshot.data!;
-
-              if (notes.isEmpty) return const Center(child: Text("No lectures yet."));
-
-              return ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                itemCount: notes.length,
-                itemBuilder: (context, index) {
-                  final note = notes[index];
-                  final isDone = note['status'] == 'Done';
-                  return Card(
-                    margin: const EdgeInsets.only(bottom: 10),
-                    elevation: 2,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    child: ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor: isDone ? Colors.green.shade100 : Colors.orange.shade100,
-                        child: Icon(isDone ? Icons.check : Icons.hourglass_empty, color: isDone ? Colors.green : Colors.orange),
-                      ),
-                      title: Text(note['title'] ?? 'Untitled', style: const TextStyle(fontWeight: FontWeight.w600)),
-                      subtitle: Text(isDone ? "Tap to review" : "AI Processing...", style: const TextStyle(fontSize: 12)),
-                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => NoteDetailsPage(noteId: note['id'], title: note['title'] ?? 'Lecture'))),
+          // 3. ACTION BUTTONS
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const RecordPage())),
+                    icon: const Icon(Icons.mic),
+                    label: const Text("Record"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.redAccent, 
+                      foregroundColor: Colors.white, 
+                      padding: const EdgeInsets.symmetric(vertical: 15), // Taller buttons
+                      elevation: 4,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
                     ),
-                  );
-                },
-              );
-            },
+                  ),
+                ),
+                const SizedBox(width: 15),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _pickAndUploadFile,
+                    icon: const Icon(Icons.upload_file),
+                    label: const Text("Upload"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white, 
+                      foregroundColor: AppTheme.deepBlue, // Theme Color
+                      padding: const EdgeInsets.symmetric(vertical: 15),
+                      elevation: 4,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-      ],
+
+          const SizedBox(height: 10),
+
+          // 4. LIST (Transparent so gradient shows)
+          Expanded(
+            child: StreamBuilder<List<Map<String, dynamic>>>(
+              stream: _notesStream,
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                final notes = snapshot.data!;
+
+                if (notes.isEmpty) return const Center(child: Text("No Lectures yet."));
+
+                return ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  itemCount: notes.length,
+                  itemBuilder: (context, index) {
+                    final note = notes[index];
+                    final isDone = note['status'] == 'Done';
+                    return Card(
+                      // Using the Theme Card style automatically!
+                      margin: const EdgeInsets.only(bottom: 12),
+                      child: ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: isDone ? Colors.green.shade50 : Colors.orange.shade50,
+                          child: Icon(isDone ? Icons.check : Icons.hourglass_empty, color: isDone ? Colors.green : Colors.orange),
+                        ),
+                        title: Text(note['title'] ?? 'Untitled', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        subtitle: Text(isDone ? "Tap to review" : "AI Processing...", style: const TextStyle(fontSize: 12)),
+                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => NoteDetailsPage(noteId: note['id'], title: note['title'] ?? 'Lecture'))),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
     );
   }
-
   Widget _buildStatCard(String title, String value, IconData icon) {
     return Expanded(
       child: Container(
         padding: const EdgeInsets.all(15),
-        decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(15)),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.9),
+          borderRadius: BorderRadius.circular(15),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.blue.withOpacity(0.1),
+              blurRadius: 8,
+              offset: const Offset(0, 4),
+            )
+          ],
+        ),
+        child: Row(
           children: [
-            Icon(icon, color: Colors.white, size: 20),
-            const SizedBox(height: 5),
-            Text(value, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-            Text(title, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+            CircleAvatar(
+              backgroundColor: AppTheme.deepBlue.withOpacity(0.1),
+              child: Icon(icon, color: AppTheme.deepBlue),
+            ),
+            const SizedBox(width: 10),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                const SizedBox(height: 5),
+                Text(value, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+              ],
+            ),
           ],
         ),
       ),

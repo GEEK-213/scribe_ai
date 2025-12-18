@@ -41,7 +41,7 @@ class _ChatSelectionPageState extends State<ChatSelectionPage> {
                 children: [
                   Icon(Icons.chat_bubble_outline, size: 50, color: Colors.grey),
                   SizedBox(height: 10),
-                  Text("No lectures to chat with."),
+                  Text("No Lectures to chat with."),
                 ],
               ),
             );

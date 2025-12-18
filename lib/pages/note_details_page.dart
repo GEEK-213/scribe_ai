@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'quiz_view.dart';
+import '../theme/app_theme.dart'; // Import the theme
 
 class NoteDetailsPage extends StatefulWidget {
   final int noteId;
@@ -13,7 +14,8 @@ class NoteDetailsPage extends StatefulWidget {
   State<NoteDetailsPage> createState() => _NoteDetailsPageState();
 }
 
-class _NoteDetailsPageState extends State<NoteDetailsPage> {
+class _NoteDetailsPageState extends State<NoteDetailsPage> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
   final AudioPlayer _audioPlayer = AudioPlayer();
   bool _isPlaying = false;
   Duration _duration = Duration.zero;
@@ -22,161 +24,204 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> {
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 3, vsync: this);
+    
     _audioPlayer.onPlayerStateChanged.listen((state) {
-      setState(() => _isPlaying = state == PlayerState.playing);
+      if (mounted) setState(() => _isPlaying = state == PlayerState.playing);
     });
-    _audioPlayer.onDurationChanged.listen((d) => setState(() => _duration = d));
-    _audioPlayer.onPositionChanged.listen((p) => setState(() => _position = p));
+
+    _audioPlayer.onDurationChanged.listen((d) {
+      if (mounted) setState(() => _duration = d);
+    });
+
+    _audioPlayer.onPositionChanged.listen((p) {
+      if (mounted) setState(() => _position = p);
+    });
   }
 
   @override
   void dispose() {
+    _tabController.dispose();
     _audioPlayer.dispose();
     super.dispose();
   }
 
-  Future<void> _playAudio(String audioPath) async {
+  Future<void> _playAudio(String path) async {
     try {
-      if (_isPlaying) {
-        await _audioPlayer.pause();
-      } else {
-        final url = await Supabase.instance.client.storage
-            .from('Lectures') 
-            .createSignedUrl(audioPath, 3600);
-        await _audioPlayer.play(UrlSource(url));
-      }
+      final url = Supabase.instance.client.storage.from('Lectures').getPublicUrl(path);
+      await _audioPlayer.play(UrlSource(url));
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Audio Error: $e")));
     }
   }
 
-  // --- DELETE FUNCTION ---
-  Future<void> _deleteNote(int id, String audioPath) async {
+  Future<void> _deleteNote() async {
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Delete Lecture?"),
+      builder: (ctx) => AlertDialog(
+        title: const Text("Delete Note?"),
         content: const Text("This cannot be undone."),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Cancel")),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text("Delete"),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Cancel")),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("Delete", style: TextStyle(color: Colors.red))),
         ],
       ),
     );
 
-    if (confirm != true) return;
-
-    try {
-      // 1. Delete file
-      await Supabase.instance.client.storage.from('Lectures').remove([audioPath]);
-      // 2. Delete DB row
-      await Supabase.instance.client.from('notes').delete().eq('id', id);
-      
-      if (mounted) {
-        Navigator.pop(context); // Go back to Home
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Deleted successfully")));
-      }
-    } catch (e) {
-      // Ignore storage errors (file might not exist), just ensure DB row is gone
-       await Supabase.instance.client.from('notes').delete().eq('id', id);
-       if(mounted) Navigator.pop(context);
+    if (confirm == true) {
+      await Supabase.instance.client.from('notes').delete().eq('id', widget.noteId);
+      if (mounted) Navigator.pop(context);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final noteStream = Supabase.instance.client
-        .from('notes')
-        .stream(primaryKey: ['id'])
-        .eq('id', widget.noteId);
+    final noteStream = Supabase.instance.client.from('notes').stream(primaryKey: ['id']).eq('id', widget.noteId);
 
-    return StreamBuilder(
-      stream: noteStream,
-      builder: (context, snapshot) {
-        // Handle Loading/Errors gracefully
-        if (!snapshot.hasData) {
-          return Scaffold(appBar: AppBar(title: Text(widget.title)), body: const Center(child: CircularProgressIndicator()));
-        }
-        if (snapshot.data!.isEmpty) {
-           return Scaffold(appBar: AppBar(title: const Text("Deleted")), body: const Center(child: Text("Note no longer exists.")));
-        }
+    return Scaffold(
+      extendBodyBehindAppBar: true, // Lets the gradient go behind the AppBar
+      appBar: AppBar(
+        title: Text(widget.title, style: const TextStyle(color: AppTheme.deepBlue)),
+        backgroundColor: Colors.transparent, // Transparent for gradient
+        elevation: 0,
+        iconTheme: const IconThemeData(color: AppTheme.deepBlue),
+        actions: [
+          IconButton(
+            onPressed: _deleteNote,
+            icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+          )
+        ],
+      ),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: AppTheme.mainGradient, // Global Ice Gradient
+        ),
+        child: StreamBuilder(
+          stream: noteStream,
+          builder: (context, snapshot) {
+            if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+            if (snapshot.data!.isEmpty) return const Center(child: Text("Note deleted"));
 
-        final note = snapshot.data!.first;
-        final status = note['status'];
-        final audioPath = note['audio_path'];
+            final note = snapshot.data![0];
+            final audioPath = note['audio_path'];
 
-        return Scaffold(
-          appBar: AppBar(
-            title: Text(widget.title),
-            actions: [
-              // DELETE BUTTON
-              IconButton(
-                icon: const Icon(Icons.delete, color: Colors.red),
-                onPressed: () => _deleteNote(widget.noteId, audioPath),
-              ),
-            ],
-          ),
-          body: Column(
-            children: [
-              // AUDIO PLAYER
-              if (status != 'Processing')
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  color: Colors.blue[50],
-                  child: Column(
-                    children: [
-                      IconButton(
-                        iconSize: 48,
-                        color: Colors.blue,
-                        icon: Icon(_isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled),
-                        onPressed: () => _playAudio(audioPath),
-                      ),
-                      Slider(
-                        min: 0,
-                        max: _duration.inSeconds.toDouble(),
-                        value: _position.inSeconds.toDouble(),
-                        onChanged: (v) => _audioPlayer.seek(Duration(seconds: v.toInt())),
-                      ),
-                    ],
-                  ),
-                ),
+            return Column(
+              children: [
+                const SizedBox(height: 100), // Space for AppBar
 
-              // TABS
-              Expanded(
-                child: DefaultTabController(
-                  length: 3,
-                  child: Column(
-                    children: [
-                      const TabBar(
-                        labelColor: Colors.blue,
-                        unselectedLabelColor: Colors.grey,
-                        tabs: [
-                          Tab(icon: Icon(Icons.summarize), text: "Summary"),
-                          Tab(icon: Icon(Icons.description), text: "Transcript"),
-                          Tab(icon: Icon(Icons.quiz), text: "Quiz"),
-                        ],
-                      ),
-                      Expanded(
-                        child: TabBarView(
+                // 1. AUDIO PLAYER CARD (Floating Glass)
+                if (audioPath != null)
+                  Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 20),
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.8),
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(color: Colors.blue.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, 5))
+                      ]
+                    ),
+                    child: Column(
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            SingleChildScrollView(padding: const EdgeInsets.all(16), child: Text(note['summary'] ?? "No summary.")),
-                            SingleChildScrollView(padding: const EdgeInsets.all(16), child: Text(note['transcript'] ?? "No transcript.")),
-                            note['quiz'] != null ? QuizView(questions: note['quiz']) : const Center(child: Text("No quiz available.")),
+                            IconButton(
+                              icon: Icon(_isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled, size: 50, color: AppTheme.primaryBlue),
+                              onPressed: () {
+                                if (_isPlaying) {
+                                  _audioPlayer.pause();
+                                } else {
+                                  _playAudio(audioPath);
+                                }
+                              },
+                            ),
                           ],
                         ),
-                      ),
+                        Slider(
+                          activeColor: AppTheme.primaryBlue,
+                          inactiveColor: AppTheme.lightIce,
+                          min: 0,
+                          max: _duration.inSeconds.toDouble(),
+                          value: _position.inSeconds.toDouble().clamp(0, _duration.inSeconds.toDouble()),
+                          onChanged: (val) async {
+                            await _audioPlayer.seek(Duration(seconds: val.toInt()));
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+
+                const SizedBox(height: 20),
+
+                // 2. TAB BAR (Pill Style)
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 20),
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(30),
+                    border: Border.all(color: AppTheme.lightIce),
+                  ),
+                  child: TabBar(
+                    controller: _tabController,
+                    labelColor: Colors.white,
+                    unselectedLabelColor: Colors.grey,
+                    indicator: BoxDecoration(
+                      color: AppTheme.primaryBlue,
+                      borderRadius: BorderRadius.circular(25),
+                    ),
+                    tabs: const [
+                      Tab(text: "Summary"),
+                      Tab(text: "Transcript"),
+                      Tab(text: "Quiz"),
                     ],
                   ),
                 ),
-              ),
-            ],
-          ),
-        );
-      },
+
+                const SizedBox(height: 10),
+
+                // 3. CONTENT AREA
+                Expanded(
+                  child: TabBarView(
+                    controller: _tabController,
+                    children: [
+                      // SUMMARY TAB
+                      _buildGlassContent(note['summary'] ?? "Generating summary..."),
+                      
+                      // TRANSCRIPT TAB
+                      _buildGlassContent(note['transcript'] ?? "Generating transcript..."),
+                      
+                      // QUIZ TAB
+                      note['quiz'] != null 
+                        ? QuizView(questions: note['quiz']) 
+                        : const Center(child: Text("Generating quiz...")),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  // Helper widget for consistent glass cards
+  Widget _buildGlassContent(String text) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.9),
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(color: Colors.blue.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 5))
+          ]
+        ),
+        child: Text(text, style: const TextStyle(height: 1.6, fontSize: 16)),
+      ),
     );
   }
 }
