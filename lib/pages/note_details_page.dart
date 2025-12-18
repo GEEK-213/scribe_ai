@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'quiz_view.dart';
-import '../theme/app_theme.dart'; // Import the theme
+import '../theme/app_theme.dart'; 
+import 'package:flutter_markdown/flutter_markdown.dart';
 
 class NoteDetailsPage extends StatefulWidget {
   final int noteId;
@@ -206,21 +207,37 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> with SingleTickerProv
       ),
     );
   }
-
-  // Helper widget for consistent glass cards
-  Widget _buildGlassContent(String text) {
+Widget _buildGlassContent(String text) {
+    // 1. ADD SCROLL VIEW HERE
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(20), // Outer padding for the scroll
+      physics: const BouncingScrollPhysics(), // Adds that nice "bounce" effect
       child: Container(
+        // Removed margin here because we put padding on the ScrollView above
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.9),
+          color: Colors.white.withOpacity(0.95), // Readable white background
           borderRadius: BorderRadius.circular(20),
           boxShadow: [
-            BoxShadow(color: Colors.blue.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 5))
-          ]
+            BoxShadow(
+              color: Colors.blue.withOpacity(0.05), 
+              blurRadius: 15, 
+              offset: const Offset(0, 5)
+            )
+          ],
         ),
-        child: Text(text, style: const TextStyle(height: 1.6, fontSize: 16)),
+        // 2. THE MARKDOWN CONTENT
+        child: MarkdownBody(
+          data: text,
+          selectable: true, 
+          styleSheet: MarkdownStyleSheet(
+            p: const TextStyle(fontSize: 15, height: 1.6, color: Colors.black87),
+            h1: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: AppTheme.deepBlue),
+            h2: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.deepBlue),
+            strong: const TextStyle(fontWeight: FontWeight.w700, color: Colors.black),
+            listBullet: const TextStyle(color: AppTheme.primaryBlue, fontSize: 16),
+          ),
+        ),
       ),
     );
   }
