@@ -95,7 +95,7 @@ class _RecordPageState extends State<RecordPage> {
       final fileName = '${DateTime.now().millisecondsSinceEpoch}_rec.aac';
       final userId = Supabase.instance.client.auth.currentUser!.id;
 
-      await Supabase.instance.client.storage.from('lectures').upload(fileName, file);
+      await Supabase.instance.client.storage.from('Lectures').upload(fileName, file);
 
       await Supabase.instance.client.from('notes').insert({
         'title': 'Lecture ${DateTime.now().hour}:${DateTime.now().minute}',

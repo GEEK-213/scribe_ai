@@ -24,9 +24,10 @@ class _DashboardViewState extends State<DashboardView> {
 
   Future<void> _pickAndUploadFile() async {
     try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
+     FilePickerResult? result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['mp3', 'm4a', 'wav', 'mp4', 'mkv'],
+       
+        allowedExtensions: ['mp3', 'm4a', 'wav', 'mp4', 'mkv', 'pdf', 'txt', 'docx', 'pptx', 'xlsx', 'avi', 'flac', 'mov', 'wmv', 'ogg', 'webm', 'rtf', 'odt'], 
       );
       if (result == null) return;
 
