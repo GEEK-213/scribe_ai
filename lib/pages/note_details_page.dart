@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'quiz_view.dart';
 class NoteDetailsPage extends StatefulWidget {
   final int noteId;
   final String title;
@@ -66,7 +67,7 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> {
     }
   }
 
-  @override
+@override
   Widget build(BuildContext context) {
     // STREAM: Watch this specific note
     final noteStream = Supabase.instance.client
@@ -100,7 +101,7 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> {
               // --- AUDIO PLAYER SECTION ---
               Container(
                 padding: const EdgeInsets.all(20),
-                color: Colors.blue[50], // Light blue background
+                color: Colors.blue[50],
                 child: Column(
                   children: [
                     Row(
@@ -128,10 +129,10 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> {
                 ),
               ),
 
-              // --- TABS SECTION ---
+              // --- TABS SECTION (UPDATED) ---
               Expanded(
                 child: DefaultTabController(
-                  length: 2, // Reduced to 2 for now (Summary & Transcript)
+                  length: 3, // <--- CHANGED TO 3
                   child: Column(
                     children: [
                       const TabBar(
@@ -140,6 +141,7 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> {
                         tabs: [
                           Tab(icon: Icon(Icons.summarize), text: "Summary"),
                           Tab(icon: Icon(Icons.description), text: "Transcript"),
+                          Tab(icon: Icon(Icons.quiz), text: "Quiz"), // <--- NEW TAB
                         ],
                       ),
                       Expanded(
@@ -161,6 +163,10 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> {
                                 style: const TextStyle(fontSize: 14, color: Colors.black87),
                               ),
                             ),
+                            // 3. Quiz Tab (NEW)
+                            note['quiz'] != null 
+                                ? QuizView(questions: note['quiz']) 
+                                : const Center(child: Text("No quiz generated for this lecture.")),
                           ],
                         ),
                       ),
