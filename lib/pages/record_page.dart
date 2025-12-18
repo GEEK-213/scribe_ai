@@ -2,7 +2,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class RecordPage extends StatefulWidget {

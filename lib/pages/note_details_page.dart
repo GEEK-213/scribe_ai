@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'quiz_view.dart';
+
 class NoteDetailsPage extends StatefulWidget {
   final int noteId;
   final String title;
@@ -17,122 +18,137 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> {
   bool _isPlaying = false;
   Duration _duration = Duration.zero;
   Duration _position = Duration.zero;
-  String? _audioUrl;
 
   @override
   void initState() {
     super.initState();
-    
-    // Listen to player state changes (Playing/Paused)
     _audioPlayer.onPlayerStateChanged.listen((state) {
-      setState(() {
-        _isPlaying = state == PlayerState.playing;
-      });
+      setState(() => _isPlaying = state == PlayerState.playing);
     });
-
-    // Listen to audio position (Progress bar)
-    _audioPlayer.onDurationChanged.listen((newDuration) {
-      setState(() => _duration = newDuration);
-    });
-    _audioPlayer.onPositionChanged.listen((newPosition) {
-      setState(() => _position = newPosition);
-    });
+    _audioPlayer.onDurationChanged.listen((d) => setState(() => _duration = d));
+    _audioPlayer.onPositionChanged.listen((p) => setState(() => _position = p));
   }
 
   @override
   void dispose() {
-    _audioPlayer.dispose(); // Clean up when leaving page
+    _audioPlayer.dispose();
     super.dispose();
   }
 
-  // Function to get the File URL and Play it
   Future<void> _playAudio(String audioPath) async {
     try {
       if (_isPlaying) {
         await _audioPlayer.pause();
       } else {
-        // 1. Get the public/signed URL from Supabase
-        // We use createSignedUrl to ensure we can access it for 60 mins
         final url = await Supabase.instance.client.storage
-            .from('Lectures')
-            .createSignedUrl(audioPath, 3600); // Valid for 1 hour
-
-        // 2. Play the URL
+            .from('Lectures') 
+            .createSignedUrl(audioPath, 3600);
         await _audioPlayer.play(UrlSource(url));
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Error playing audio: $e")),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
     }
   }
 
-@override
+  // --- DELETE FUNCTION ---
+  Future<void> _deleteNote(int id, String audioPath) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Delete Lecture?"),
+        content: const Text("This cannot be undone."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Cancel")),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text("Delete"),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    try {
+      // 1. Delete file
+      await Supabase.instance.client.storage.from('Lectures').remove([audioPath]);
+      // 2. Delete DB row
+      await Supabase.instance.client.from('notes').delete().eq('id', id);
+      
+      if (mounted) {
+        Navigator.pop(context); // Go back to Home
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Deleted successfully")));
+      }
+    } catch (e) {
+      // Ignore storage errors (file might not exist), just ensure DB row is gone
+       await Supabase.instance.client.from('notes').delete().eq('id', id);
+       if(mounted) Navigator.pop(context);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    // STREAM: Watch this specific note
     final noteStream = Supabase.instance.client
         .from('notes')
         .stream(primaryKey: ['id'])
         .eq('id', widget.noteId);
 
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.title)),
-      body: StreamBuilder(
-        stream: noteStream,
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+    return StreamBuilder(
+      stream: noteStream,
+      builder: (context, snapshot) {
+        // Handle Loading/Errors gracefully
+        if (!snapshot.hasData) {
+          return Scaffold(appBar: AppBar(title: Text(widget.title)), body: const Center(child: CircularProgressIndicator()));
+        }
+        if (snapshot.data!.isEmpty) {
+           return Scaffold(appBar: AppBar(title: const Text("Deleted")), body: const Center(child: Text("Note no longer exists.")));
+        }
 
-          final note = snapshot.data!.first;
-          final status = note['status'];
-          final audioPath = note['audio_path'];
+        final note = snapshot.data!.first;
+        final status = note['status'];
+        final audioPath = note['audio_path'];
 
-          // UI Helper: Format duration (e.g. 02:15)
-          String formatTime(Duration d) {
-            String twoDigits(int n) => n.toString().padLeft(2, "0");
-            return "${twoDigits(d.inMinutes.remainder(60))}:${twoDigits(d.inSeconds.remainder(60))}";
-          }
-
-          if (status == 'Processing') {
-            return const Center(child: Text("AI is still processing..."));
-          }
-
-          return Column(
-            children: [
-              // --- AUDIO PLAYER SECTION ---
-              Container(
-                padding: const EdgeInsets.all(20),
-                color: Colors.blue[50],
-                child: Column(
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        IconButton(
-                          iconSize: 48,
-                          color: Colors.blue,
-                          icon: Icon(_isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled),
-                          onPressed: () => _playAudio(audioPath),
-                        ),
-                      ],
-                    ),
-                    Slider(
-                      min: 0,
-                      max: _duration.inSeconds.toDouble(),
-                      value: _position.inSeconds.toDouble(),
-                      onChanged: (value) async {
-                        final position = Duration(seconds: value.toInt());
-                        await _audioPlayer.seek(position);
-                      },
-                    ),
-                    Text("${formatTime(_position)} / ${formatTime(_duration)}"),
-                  ],
-                ),
+        return Scaffold(
+          appBar: AppBar(
+            title: Text(widget.title),
+            actions: [
+              // DELETE BUTTON
+              IconButton(
+                icon: const Icon(Icons.delete, color: Colors.red),
+                onPressed: () => _deleteNote(widget.noteId, audioPath),
               ),
+            ],
+          ),
+          body: Column(
+            children: [
+              // AUDIO PLAYER
+              if (status != 'Processing')
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  color: Colors.blue[50],
+                  child: Column(
+                    children: [
+                      IconButton(
+                        iconSize: 48,
+                        color: Colors.blue,
+                        icon: Icon(_isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled),
+                        onPressed: () => _playAudio(audioPath),
+                      ),
+                      Slider(
+                        min: 0,
+                        max: _duration.inSeconds.toDouble(),
+                        value: _position.inSeconds.toDouble(),
+                        onChanged: (v) => _audioPlayer.seek(Duration(seconds: v.toInt())),
+                      ),
+                    ],
+                  ),
+                ),
 
-              // --- TABS SECTION (UPDATED) ---
+              // TABS
               Expanded(
                 child: DefaultTabController(
-                  length: 3, // <--- CHANGED TO 3
+                  length: 3,
                   child: Column(
                     children: [
                       const TabBar(
@@ -141,32 +157,15 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> {
                         tabs: [
                           Tab(icon: Icon(Icons.summarize), text: "Summary"),
                           Tab(icon: Icon(Icons.description), text: "Transcript"),
-                          Tab(icon: Icon(Icons.quiz), text: "Quiz"), // <--- NEW TAB
+                          Tab(icon: Icon(Icons.quiz), text: "Quiz"),
                         ],
                       ),
                       Expanded(
                         child: TabBarView(
                           children: [
-                            // 1. Summary Tab
-                            SingleChildScrollView(
-                              padding: const EdgeInsets.all(16),
-                              child: Text(
-                                note['summary'] ?? "No summary.",
-                                style: const TextStyle(fontSize: 16, height: 1.5),
-                              ),
-                            ),
-                            // 2. Transcript Tab
-                            SingleChildScrollView(
-                              padding: const EdgeInsets.all(16),
-                              child: Text(
-                                note['transcript'] ?? "No transcript.",
-                                style: const TextStyle(fontSize: 14, color: Colors.black87),
-                              ),
-                            ),
-                            // 3. Quiz Tab (NEW)
-                            note['quiz'] != null 
-                                ? QuizView(questions: note['quiz']) 
-                                : const Center(child: Text("No quiz generated for this lecture.")),
+                            SingleChildScrollView(padding: const EdgeInsets.all(16), child: Text(note['summary'] ?? "No summary.")),
+                            SingleChildScrollView(padding: const EdgeInsets.all(16), child: Text(note['transcript'] ?? "No transcript.")),
+                            note['quiz'] != null ? QuizView(questions: note['quiz']) : const Center(child: Text("No quiz available.")),
                           ],
                         ),
                       ),
@@ -175,9 +174,9 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> {
                 ),
               ),
             ],
-          );
-        },
-      ),
+          ),
+        );
+      },
     );
   }
 }

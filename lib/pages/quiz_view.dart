@@ -14,25 +14,23 @@ class _QuizViewState extends State<QuizView> {
   int _score = 0;
   bool _isAnswered = false;
   int? _selectedOptionIndex;
-  
-  // New Variable: We calculate this for every question
   int _correctOptionIndex = -1; 
 
   @override
   void initState() {
     super.initState();
-    // Initialize the first question's correct answer
     _determineCorrectAnswer();
   }
 
-  // --- LOGIC TO FIND THE RIGHT ANSWER ---
   void _determineCorrectAnswer() {
     final question = widget.questions[_currentIndex];
     final rawAnswer = question['answer'].toString().trim().toUpperCase();
     final options = List<String>.from(question['options']);
 
-    // Strategy 1: Check if the Answer Text matches one of the Options
-    // (e.g., Answer="Blue", Options=["Red", "Blue"] -> Index 1)
+    // Reset default
+    _correctOptionIndex = 0;
+
+    // Strategy 1: Match text
     for (int i = 0; i < options.length; i++) {
       if (options[i].toUpperCase().trim() == rawAnswer) {
         setState(() => _correctOptionIndex = i);
@@ -40,17 +38,16 @@ class _QuizViewState extends State<QuizView> {
       }
     }
 
-    // Strategy 2: Check if Answer is a Letter "A", "B", "C", "D"
-    // (e.g., Answer="B" -> Index 1)
+    // Strategy 2: Match Letter (A, B, C...)
     if (rawAnswer.length == 1) {
-      int letterIndex = rawAnswer.codeUnitAt(0) - 65; // 'A' is 65
+      int letterIndex = rawAnswer.codeUnitAt(0) - 65; 
       if (letterIndex >= 0 && letterIndex < options.length) {
         setState(() => _correctOptionIndex = letterIndex);
         return;
       }
     }
     
-    // Strategy 3: Handle "Option A" format
+    // Strategy 3: Handle "Option A"
     if (rawAnswer.startsWith("OPTION ")) {
        String letter = rawAnswer.split(" ").last;
        int letterIndex = letter.codeUnitAt(0) - 65;
@@ -59,9 +56,6 @@ class _QuizViewState extends State<QuizView> {
          return;
        }
     }
-
-    // Fallback (Should not happen)
-    setState(() => _correctOptionIndex = 0);
   }
 
   void _answerQuestion(int optionIndex) {
@@ -70,8 +64,6 @@ class _QuizViewState extends State<QuizView> {
     setState(() {
       _isAnswered = true;
       _selectedOptionIndex = optionIndex;
-      
-      // Compare Indices directly
       if (optionIndex == _correctOptionIndex) {
         _score++;
       }
@@ -84,7 +76,6 @@ class _QuizViewState extends State<QuizView> {
       _isAnswered = false;
       _selectedOptionIndex = null;
     });
-    // Calculate correct answer for the NEXT question
     if (_currentIndex < widget.questions.length) {
       _determineCorrectAnswer();
     }
@@ -109,7 +100,7 @@ class _QuizViewState extends State<QuizView> {
                   _currentIndex = 0;
                   _score = 0;
                   _isAnswered = false;
-                  _determineCorrectAnswer(); // Reset logic
+                  _determineCorrectAnswer();
                 });
               },
               child: const Text("Restart Quiz"),
@@ -122,7 +113,8 @@ class _QuizViewState extends State<QuizView> {
     final question = widget.questions[_currentIndex];
     final options = List<String>.from(question['options']);
 
-    return Padding(
+    // --- SCROLLABLE FIX ---
+    return SingleChildScrollView(
       padding: const EdgeInsets.all(16.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -140,7 +132,6 @@ class _QuizViewState extends State<QuizView> {
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 20),
           
-          // Generate Options Buttons
           ...List.generate(options.length, (index) {
             final letter = String.fromCharCode(65 + index);
             Color color = Colors.white;
@@ -148,10 +139,10 @@ class _QuizViewState extends State<QuizView> {
 
             if (_isAnswered) {
               if (index == _correctOptionIndex) {
-                color = Colors.green.shade100; // Correct index turns Green
+                color = Colors.green.shade100;
                 borderColor = Colors.green;
               } else if (index == _selectedOptionIndex) {
-                color = Colors.red.shade100; // Wrong selection turns Red
+                color = Colors.red.shade100;
                 borderColor = Colors.red;
               }
             }
@@ -188,12 +179,13 @@ class _QuizViewState extends State<QuizView> {
             );
           }),
           
-          const Spacer(),
+          const SizedBox(height: 20), 
+
           if (_isAnswered)
             ElevatedButton(
               onPressed: _nextQuestion,
               style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue, foregroundColor: Colors.white),
+                  backgroundColor: Colors.blue, foregroundColor: Colors.white, padding: const EdgeInsets.all(15)),
               child: Text(_currentIndex == widget.questions.length - 1
                   ? "Finish"
                   : "Next Question"),

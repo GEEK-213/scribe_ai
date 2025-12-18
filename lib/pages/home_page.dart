@@ -14,38 +14,29 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  int _selectedIndex = 0; // For Bottom Navigation
-
-  // GET USER ID
+  int _selectedIndex = 0;
   final _userId = Supabase.instance.client.auth.currentUser?.id;
 
-  // STREAM: Fetch only user's notes
   late final _notesStream = Supabase.instance.client
       .from('notes')
       .stream(primaryKey: ['id'])
       .eq('user_id', _userId ?? '')
       .order('created_at', ascending: false);
 
-  // --- UPLOAD FUNCTION ---
   Future<void> _pickAndUploadFile() async {
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['mp3', 'm4a', 'wav', 'mp4', 'mkv'],
       );
-
       if (result == null) return;
 
       final file = File(result.files.single.path!);
       final fileName = '${DateTime.now().millisecondsSinceEpoch}_upload.${result.files.single.extension}';
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Uploading file...')),
-        );
-      }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Uploading...')));
 
-      await Supabase.instance.client.storage.from('lectures').upload(fileName, file);
+      await Supabase.instance.client.storage.from('Lectures').upload(fileName, file);
 
       await Supabase.instance.client.from('notes').insert({
         'title': 'Upload ${DateTime.now().hour}:${DateTime.now().minute}',
@@ -53,46 +44,28 @@ class _HomePageState extends State<HomePage> {
         'status': 'Processing',
         'user_id': _userId,
       });
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Upload Complete! AI is working.')),
-        );
-      }
+      
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Success! AI is processing.')));
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-        );
-      }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
     }
   }
 
-  // --- LOGOUT ---
   Future<void> _signOut() async {
     await Supabase.instance.client.auth.signOut();
-    if (mounted) {
-      Navigator.pushReplacement(
-          context, MaterialPageRoute(builder: (context) => const LoginPage()));
-    }
+    if (mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const LoginPage()));
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[100], // Light background
-      
-      // TOP APP BAR
+      backgroundColor: Colors.grey[100],
       appBar: AppBar(
         elevation: 0,
         backgroundColor: Colors.blue.shade800,
         title: const Text('ScribeAI Dashboard', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        actions: [
-          IconButton(onPressed: _signOut, icon: const Icon(Icons.logout, color: Colors.white))
-        ],
+        actions: [IconButton(onPressed: _signOut, icon: const Icon(Icons.logout, color: Colors.white))],
       ),
-
-      // BOTTOM NAVIGATION (Preparation for Chatbot & Planner)
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         onTap: (index) => setState(() => _selectedIndex = index),
@@ -100,174 +73,113 @@ class _HomePageState extends State<HomePage> {
         unselectedItemColor: Colors.grey,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.dashboard), label: 'Home'),
-          BottomNavigationBarItem(icon: Icon(Icons.chat_bubble), label: 'AI Tutor'), // Feature #1
-          BottomNavigationBarItem(icon: Icon(Icons.calendar_month), label: 'Planner'), // Feature #4
+          BottomNavigationBarItem(icon: Icon(Icons.chat_bubble), label: 'AI Tutor'),
+          BottomNavigationBarItem(icon: Icon(Icons.calendar_month), label: 'Planner'),
         ],
       ),
-
-      // BODY
-      body: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 1. HEADER SECTION
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Colors.blue.shade800,
-                borderRadius: const BorderRadius.only(
-                  bottomLeft: Radius.circular(30),
-                  bottomRight: Radius.circular(30),
+      // OPTIMIZED LAYOUT: Header is fixed, List is Expanded
+      body: Column(
+        children: [
+          // 1. FIXED HEADER
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.blue.shade800,
+              borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(30), bottomRight: Radius.circular(30)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text("Welcome Back! 👋", style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 10),
+                const Text("Let's crush your studies today.", style: TextStyle(color: Colors.white70, fontSize: 14)),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    _buildStatCard("Lectures", "Checking...", Icons.mic),
+                    const SizedBox(width: 10),
+                    _buildStatCard("Avg Quiz", "85%", Icons.emoji_events),
+                  ],
                 ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text("Welcome Back, Student! 👋", 
-                    style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)
-                  ),
-                  const SizedBox(height: 10),
-                  const Text("Let's crush your studies today.", 
-                    style: TextStyle(color: Colors.white70, fontSize: 14)
-                  ),
-                  const SizedBox(height: 20),
-                  
-                  // Quick Stats Row
-                  Row(
-                    children: [
-                      _buildStatCard("Lectures", "Checking...", Icons.mic),
-                      const SizedBox(width: 10),
-                      _buildStatCard("Avg Quiz", "85%", Icons.emoji_events),
-                    ],
-                  ),
-                ],
-              ),
+              ],
             ),
+          ),
+          
+          const SizedBox(height: 15),
 
-            const SizedBox(height: 20),
-
-            // 2. ACTION BUTTONS
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () {
-                         Navigator.push(context, MaterialPageRoute(builder: (context) => const RecordPage()));
-                      },
-                      icon: const Icon(Icons.mic),
-                      label: const Text("Record"),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.redAccent,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 15),
-                      ),
-                    ),
+          // 2. ACTION BUTTONS
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const RecordPage())),
+                    icon: const Icon(Icons.mic),
+                    label: const Text("Record"),
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 12)),
                   ),
-                  const SizedBox(width: 15),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: _pickAndUploadFile,
-                      icon: const Icon(Icons.upload_file),
-                      label: const Text("Upload"),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: Colors.black,
-                        padding: const EdgeInsets.symmetric(vertical: 15),
-                      ),
-                    ),
+                ),
+                const SizedBox(width: 15),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _pickAndUploadFile,
+                    icon: const Icon(Icons.upload_file),
+                    label: const Text("Upload"),
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black, padding: const EdgeInsets.symmetric(vertical: 12)),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
+          ),
 
-            const SizedBox(height: 25),
+          const SizedBox(height: 10),
 
-            // 3. RECENT LECTURES TITLE
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text("Recent Lectures", 
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)
-                  ),
-                  TextButton(onPressed: (){}, child: const Text("View All"))
-                ],
-              ),
-            ),
-
-            // 4. THE LIST (StreamBuilder)
-            StreamBuilder<List<Map<String, dynamic>>>(
+          // 3. SCROLLING LIST (Wrapped in Expanded)
+          Expanded(
+            child: StreamBuilder<List<Map<String, dynamic>>>(
               stream: _notesStream,
               builder: (context, snapshot) {
                 if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
                 final notes = snapshot.data!;
 
-                if (notes.isEmpty) {
-                  return const Padding(
-                    padding: EdgeInsets.all(40),
-                    child: Center(child: Text("No lectures yet. Start recording!")),
-                  );
-                }
+                if (notes.isEmpty) return const Center(child: Text("No lectures yet."));
 
                 return ListView.builder(
-                  shrinkWrap: true, // Vital for scrolling inside SingleChildScrollView
-                  physics: const NeverScrollableScrollPhysics(),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                   itemCount: notes.length,
                   itemBuilder: (context, index) {
                     final note = notes[index];
                     final isDone = note['status'] == 'Done';
-
                     return Card(
-                      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                      margin: const EdgeInsets.only(bottom: 10),
                       elevation: 2,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       child: ListTile(
                         leading: CircleAvatar(
                           backgroundColor: isDone ? Colors.green.shade100 : Colors.orange.shade100,
-                          child: Icon(
-                            isDone ? Icons.check : Icons.hourglass_empty, 
-                            color: isDone ? Colors.green : Colors.orange
-                          ),
+                          child: Icon(isDone ? Icons.check : Icons.hourglass_empty, color: isDone ? Colors.green : Colors.orange),
                         ),
                         title: Text(note['title'] ?? 'Untitled', style: const TextStyle(fontWeight: FontWeight.w600)),
                         subtitle: Text(isDone ? "Tap to review" : "AI Processing...", style: const TextStyle(fontSize: 12)),
-                        trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => NoteDetailsPage(
-                                noteId: note['id'], 
-                                title: note['title'] ?? 'Lecture',
-                              ),
-                            ),
-                          );
-                        },
+                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => NoteDetailsPage(noteId: note['id'], title: note['title'] ?? 'Lecture'))),
                       ),
                     );
                   },
                 );
               },
             ),
-            const SizedBox(height: 40),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
-  // Helper widget for Stats
   Widget _buildStatCard(String title, String value, IconData icon) {
     return Expanded(
       child: Container(
         padding: const EdgeInsets.all(15),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.2),
-          borderRadius: BorderRadius.circular(15),
-        ),
+        decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(15)),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
