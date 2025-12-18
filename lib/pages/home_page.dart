@@ -3,6 +3,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'login_page.dart';
 import 'record_page.dart';
 import 'note_details_page.dart'; 
+import 'package:file_picker/file_picker.dart';
+import 'dart:io'; 
 
 
 class HomePage extends StatefulWidget {
@@ -14,9 +16,13 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   // STREAM: This listens to the 'notes' table in real-time
-  final _notesStream = Supabase.instance.client
+  final _userId = Supabase.instance.client.auth.currentUser!.id;
+
+  // STREAM: Listen ONLY to notes that belong to this user
+  late final _notesStream = Supabase.instance.client
       .from('notes')
       .stream(primaryKey: ['id'])
+      .eq('user_id', _userId) // <--- THIS IS THE SECURITY FILTER
       .order('created_at', ascending: false);
 
   Future<void> _signOut() async {
@@ -26,6 +32,55 @@ class _HomePageState extends State<HomePage> {
         context, 
         MaterialPageRoute(builder: (context) => const LoginPage())
       );
+    }
+  }
+
+// FUNCTION: Pick a file and upload it
+  Future<void> _pickAndUploadFile() async {
+    try {
+      // 1. Open File Picker
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['mp3', 'm4a', 'wav', 'mp4', 'mkv'], // Audio & Video
+      );
+
+      if (result == null) return; // User canceled
+
+      // 2. Get the file
+      final file = File(result.files.single.path!);
+      final fileName = '${DateTime.now().millisecondsSinceEpoch}_upload.${result.files.single.extension}';
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Uploading file... this may take time.')),
+        );
+      }
+
+      // 3. Upload to Supabase Storage
+      await Supabase.instance.client.storage
+          .from('Lectures')
+          .upload(fileName, file);
+
+      // 4. Create Database Entry
+      final userId = Supabase.instance.client.auth.currentUser?.id;
+      await Supabase.instance.client.from('notes').insert({
+        'title': 'Uploaded File ${DateTime.now().hour}:${DateTime.now().minute}',
+        'audio_path': fileName,
+        'status': 'Processing',
+        'user_id': userId,
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Upload Complete! AI is processing.')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
     }
   }
 
@@ -107,17 +162,36 @@ class _HomePageState extends State<HomePage> {
       ),
 
       // RECORD BUTTON
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (context) => const RecordPage()),
-          );
-        },
-        label: const Text('New Lecture'),
-        icon: const Icon(Icons.mic),
-        backgroundColor: Colors.red,
-        foregroundColor: Colors.white,
+      // UPDATED BUTTONS (Row of 2)
+      floatingActionButton: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          // 1. Upload Button (White)
+          FloatingActionButton.extended(
+            heroTag: "upload_btn",
+            onPressed: _pickAndUploadFile, // Calls your new function!
+            label: const Text('Upload'),
+            icon: const Icon(Icons.upload_file),
+            backgroundColor: Colors.white,
+            foregroundColor: Colors.black,
+          ),
+          const SizedBox(width: 10), // Space between buttons
+          
+          // 2. Record Button (Red)
+          FloatingActionButton.extended(
+            heroTag: "record_btn",
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const RecordPage()),
+              );
+            },
+            label: const Text('Record'),
+            icon: const Icon(Icons.mic),
+            backgroundColor: Colors.red,
+            foregroundColor: Colors.white,
+          ),
+        ],
       ),
     );
   }
