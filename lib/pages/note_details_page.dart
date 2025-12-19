@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:audioplayers/audioplayers.dart';
-import 'quiz_view.dart';
-import '../theme/app_theme.dart'; 
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:flip_card/flip_card.dart'; 
+import '../theme/app_theme.dart';
+import 'chat_screen.dart';
+import 'quiz_view.dart';
 
 class NoteDetailsPage extends StatefulWidget {
   final int noteId;
@@ -25,19 +27,14 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> with SingleTickerProv
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    // INCREASED TABS TO 4 (Summary, Transcript, Quiz, Cards)
+    _tabController = TabController(length: 4, vsync: this); 
     
     _audioPlayer.onPlayerStateChanged.listen((state) {
       if (mounted) setState(() => _isPlaying = state == PlayerState.playing);
     });
-
-    _audioPlayer.onDurationChanged.listen((d) {
-      if (mounted) setState(() => _duration = d);
-    });
-
-    _audioPlayer.onPositionChanged.listen((p) {
-      if (mounted) setState(() => _position = p);
-    });
+    _audioPlayer.onDurationChanged.listen((d) => setState(() => _duration = d));
+    _audioPlayer.onPositionChanged.listen((p) => setState(() => _position = p));
   }
 
   @override
@@ -49,7 +46,13 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> with SingleTickerProv
 
   Future<void> _playAudio(String path) async {
     try {
-      final url = Supabase.instance.client.storage.from('Lectures').getPublicUrl(path);
+      // Try lowercase bucket first, then capitalized
+      String url;
+      try {
+        url = Supabase.instance.client.storage.from('Lectures').getPublicUrl(path);
+      } catch (e) {
+        url = Supabase.instance.client.storage.from('Lectures').getPublicUrl(path);
+      }
       await _audioPlayer.play(UrlSource(url));
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Audio Error: $e")));
@@ -80,13 +83,23 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> with SingleTickerProv
     final noteStream = Supabase.instance.client.from('notes').stream(primaryKey: ['id']).eq('id', widget.noteId);
 
     return Scaffold(
-      extendBodyBehindAppBar: true, // Lets the gradient go behind the AppBar
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
         title: Text(widget.title, style: const TextStyle(color: AppTheme.deepBlue)),
-        backgroundColor: Colors.transparent, // Transparent for gradient
+        backgroundColor: Colors.transparent,
         elevation: 0,
         iconTheme: const IconThemeData(color: AppTheme.deepBlue),
         actions: [
+          // Chat Button
+          IconButton(
+            icon: const Icon(Icons.chat_bubble_outline, color: AppTheme.primaryBlue),
+            onPressed: () {
+               Navigator.push(context, MaterialPageRoute(
+                 builder: (_) => ChatScreen(noteId: widget.noteId, noteTitle: widget.title),
+               ));
+            },
+          ),
+          // Delete Button
           IconButton(
             onPressed: _deleteNote,
             icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
@@ -94,9 +107,7 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> with SingleTickerProv
         ],
       ),
       body: Container(
-        decoration: const BoxDecoration(
-          gradient: AppTheme.mainGradient, // Global Ice Gradient
-        ),
+        decoration: const BoxDecoration(gradient: AppTheme.mainGradient),
         child: StreamBuilder(
           stream: noteStream,
           builder: (context, snapshot) {
@@ -108,9 +119,9 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> with SingleTickerProv
 
             return Column(
               children: [
-                const SizedBox(height: 100), // Space for AppBar
+                const SizedBox(height: 100),
 
-                // 1. AUDIO PLAYER CARD (Floating Glass)
+                // 1. AUDIO PLAYER CARD
                 if (audioPath != null)
                   Container(
                     margin: const EdgeInsets.symmetric(horizontal: 20),
@@ -118,9 +129,7 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> with SingleTickerProv
                     decoration: BoxDecoration(
                       color: Colors.white.withOpacity(0.8),
                       borderRadius: BorderRadius.circular(20),
-                      boxShadow: [
-                        BoxShadow(color: Colors.blue.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, 5))
-                      ]
+                      boxShadow: [BoxShadow(color: Colors.blue.withOpacity(0.1), blurRadius: 10)]
                     ),
                     child: Column(
                       children: [
@@ -155,7 +164,7 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> with SingleTickerProv
 
                 const SizedBox(height: 20),
 
-                // 2. TAB BAR (Pill Style)
+                // 2. TAB BAR
                 Container(
                   margin: const EdgeInsets.symmetric(horizontal: 20),
                   padding: const EdgeInsets.all(4),
@@ -176,27 +185,22 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> with SingleTickerProv
                       Tab(text: "Summary"),
                       Tab(text: "Transcript"),
                       Tab(text: "Quiz"),
+                      Tab(text: "Cards"), // <--- NEW TAB
                     ],
                   ),
                 ),
 
                 const SizedBox(height: 10),
 
-                // 3. CONTENT AREA
+                // 3. TAB CONTENT
                 Expanded(
                   child: TabBarView(
                     controller: _tabController,
                     children: [
-                      // SUMMARY TAB
-                      _buildGlassContent(note['summary'] ?? "Generating summary..."),
-                      
-                      // TRANSCRIPT TAB
-                      _buildGlassContent(note['transcript'] ?? "Generating transcript..."),
-                      
-                      // QUIZ TAB
-                      note['quiz'] != null 
-                        ? QuizView(questions: note['quiz']) 
-                        : const Center(child: Text("Generating quiz...")),
+                      _buildGlassContent(note['summary'] ?? "Generating..."),
+                      _buildGlassContent(note['transcript'] ?? "Generating..."),
+                      note['quiz'] != null ? QuizView(questions: note['quiz']) : const Center(child: Text("Generating quiz...")),
+                      _buildFlashcardsView(widget.noteId), // <--- NEW VIEW
                     ],
                   ),
                 ),
@@ -207,37 +211,115 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> with SingleTickerProv
       ),
     );
   }
-Widget _buildGlassContent(String text) {
-    // 1. ADD SCROLL VIEW HERE
+
+  // --- MARKDOWN HELPER ---
+  Widget _buildGlassContent(String text) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(20), // Outer padding for the scroll
-      physics: const BouncingScrollPhysics(), // Adds that nice "bounce" effect
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.all(20),
       child: Container(
-        // Removed margin here because we put padding on the ScrollView above
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.95), // Readable white background
+          color: Colors.white.withOpacity(0.95),
           borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.blue.withOpacity(0.05), 
-              blurRadius: 15, 
-              offset: const Offset(0, 5)
-            )
-          ],
+          boxShadow: [BoxShadow(color: Colors.blue.withOpacity(0.05), blurRadius: 15)],
         ),
-        // 2. THE MARKDOWN CONTENT
         child: MarkdownBody(
           data: text,
-          selectable: true, 
+          selectable: true,
           styleSheet: MarkdownStyleSheet(
             p: const TextStyle(fontSize: 15, height: 1.6, color: Colors.black87),
             h1: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: AppTheme.deepBlue),
             h2: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.deepBlue),
-            strong: const TextStyle(fontWeight: FontWeight.w700, color: Colors.black),
             listBullet: const TextStyle(color: AppTheme.primaryBlue, fontSize: 16),
+            strong: const TextStyle(fontWeight: FontWeight.w700),
           ),
         ),
+      ),
+    );
+  }
+
+  // --- FLASHCARDS WIDGET (The New Feature!) ---
+  Widget _buildFlashcardsView(int noteId) {
+    // Fetch cards related to this specific note
+    final stream = Supabase.instance.client
+        .from('flashcards')
+        .stream(primaryKey: ['id'])
+        .eq('note_id', noteId);
+
+    return StreamBuilder<List<Map<String, dynamic>>>(
+      stream: stream,
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+        final cards = snapshot.data!;
+
+        if (cards.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.style_outlined, size: 60, color: Colors.grey[300]),
+                const SizedBox(height: 10),
+                const Text("No flashcards found.", style: TextStyle(color: Colors.grey)),
+                const SizedBox(height: 5),
+                const Text("Upload a new file to generate them!", style: TextStyle(fontSize: 12, color: Colors.grey)),
+              ],
+            ),
+          );
+        }
+
+        return ListView.builder(
+          padding: const EdgeInsets.all(20),
+          itemCount: cards.length,
+          itemBuilder: (context, index) {
+            final card = cards[index];
+            return Container(
+              height: 200, // Fixed height for consistency
+              margin: const EdgeInsets.only(bottom: 20),
+              child: FlipCard(
+                direction: FlipDirection.HORIZONTAL,
+                front: _buildCardFace(card['front'], AppTheme.primaryBlue, Colors.white, "Tap to Flip"),
+                back: _buildCardFace(card['back'], Colors.white, Colors.black87, "Definition"),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildCardFace(String text, Color bgColor, Color textColor, String subText) {
+    return Container(
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, 5))],
+        border: bgColor == Colors.white ? Border.all(color: AppTheme.lightIce, width: 2) : null,
+      ),
+      alignment: Alignment.center,
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            text,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 18, 
+              fontWeight: FontWeight.bold, 
+              color: textColor,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            subText, 
+            style: TextStyle(
+              fontSize: 12, 
+              color: textColor.withOpacity(0.7),
+              fontStyle: FontStyle.italic
+            )
+          ),
+        ],
       ),
     );
   }

@@ -2,10 +2,11 @@ import os
 import time
 import asyncio
 import json
+import re
 from dotenv import load_dotenv
 from supabase import create_client, Client
 import google.generativeai as genai
-from PyPDF2 import PdfReader 
+from PyPDF2 import PdfReader
 
 # 1. SETUP
 load_dotenv()
@@ -13,14 +14,18 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 
+if not GEMINI_KEY:
+    print("❌ ERROR: GEMINI_API_KEY is missing from .env file!")
+    exit()
+
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel("gemini-2.5-flash") 
+model = genai.GenerativeModel("gemini-2.5-flash-lite") 
 
-print("🟢 AI Engine V3 (Multi-Modal + Chat) is Ready...")
+print("🟢 AI Engine V4 (Parallel Chat + Retry) is Ready...")
 
+# --- HELPER FUNCTIONS ---
 def extract_text_from_pdf(file_path):
-    """Helper to read text from PDF files"""
     try:
         reader = PdfReader(file_path)
         text = ""
@@ -30,156 +35,174 @@ def extract_text_from_pdf(file_path):
     except Exception as e:
         return f"Error reading PDF: {e}"
 
-async def process_new_uploads():
-    """Listens for new files (Audio OR PDF) to process."""
-    # Fetch 'Processing' notes
-    response = supabase.table('notes').select("*").eq('status', 'Processing').execute()
-    notes = response.data
-
-    for note in notes:
-        print(f"📄 Found new upload: {note['audio_path']}") # 'audio_path' stores filename for both
+def clean_and_parse_json(raw_text):
+    if not raw_text: return []
+    text = raw_text.replace("```json", "").replace("```", "").strip()
+    try:
+        return json.loads(text)
+    except:
         try:
-            # 1. Download File (Audio or PDF)
-            file_path = note['audio_path']
-            data = supabase.storage.from_('Lectures').download(file_path) # Changed bucket to lowercase 'Lectures' if needed
-            
-            # Determine extension
-            ext = file_path.split('.')[-1].lower()
-            temp_filename = f"temp_{note['id']}.{ext}"
-            
-            with open(temp_filename, "wb") as f:
-                f.write(data)
+            match = re.search(r'\[.*\]', text, re.DOTALL)
+            if match: return json.loads(match.group())
+        except: pass
+    return []
 
-            # 2. Prepare Input for Gemini
+# --- CORE PROCESSES ---
+async def process_new_uploads():
+    """Handles heavy file processing."""
+    response = supabase.table('notes').select("*").eq('status', 'Processing').execute()
+    if not response.data: return # Don't print if empty to keep console clean
+
+    for note in response.data:
+        print(f"📄 Processing Upload: {note['audio_path']}") 
+        temp_filename = f"temp_{note['id']}"
+        
+        try:
+            # 1. Download
+            try:
+                data = supabase.storage.from_('Lectures').download(note['audio_path'])
+            except:
+                data = supabase.storage.from_('Lectures').download(note['audio_path'])
+            
+            ext = note['audio_path'].split('.')[-1].lower()
+            temp_filename += f".{ext}"
+            with open(temp_filename, "wb") as f: f.write(data)
+
+            # 2. Prepare Gemini Input
             gemini_inputs = []
-            print("   Thinking...")
+            
+            prompt = """
+            You are an expert academic tutor. Analyze the provided content.
+            1. TRANSCRIPT: Convert audio to text OR format the document text.
+            2. SUMMARY: Create a concise bullet-point summary.
+            3. QUIZ: Generate 5 multiple-choice questions.
+            4. FLASHCARDS: Identify 5-10 key terms and their definitions.
+            5. TASKS: Extract any homework/deadlines (e.g. "Assignment due Friday").
 
-            # --- BRANCH: PDF HANDLING ---
-            if ext in ['pdf', 'txt']:
-                print("   (Processing as Document)")
-                extracted_text = extract_text_from_pdf(temp_filename)
-                
-                # We feed the text directly to the prompt
-                gemini_inputs = [extracted_text]
-                
-                # Modified prompt for Text
-                base_prompt = """
-                You are an expert tutor analyzing this document.
-                1. FORMAT the text inside TRANSCRIPT_START and TRANSCRIPT_END.
-                2. Create a Summary with bullet points.
-                3. Generate a Quiz with 5 questions in JSON format.
-                """
-
-            # --- BRANCH: AUDIO HANDLING ---
-            else:
-                print("   (Processing as Audio)")
-                audio_file = genai.upload_file(temp_filename)
-                
-                # Wait for audio processing
-                while audio_file.state.name == "PROCESSING":
-                    await asyncio.sleep(1) # Async sleep to not block chat
-                    audio_file = genai.get_file(audio_file.name)
-                
-                gemini_inputs = [audio_file]
-                
-                # Modified prompt for Audio
-                base_prompt = """
-                You are an expert tutor listening to this audio.
-                1. Generate a clear Transcript.
-                2. Create a Summary with bullet points.
-                3. Generate a Quiz with 5 questions in JSON format.
-                """
-
-            # 3. Unified Output Instructions (Keep Parser Happy)
-            final_prompt = base_prompt + """
-            Output format (STRICTLY FOLLOW THIS):
+            Output format (Strict JSON blocks):
             TRANSCRIPT_START
-            [The Full Text or Transcript Here]
+            [Text]
             TRANSCRIPT_END
             SUMMARY_START
-            [Bullet points here]
+            [Text]
             SUMMARY_END
             QUIZ_START
-            [{"question": "...", "options": ["A", "B", "C", "D"], "answer": "Option A"}]
+            [{"question": "...", "options": ["A", "B"], "answer": "A"}]
             QUIZ_END
+            FLASHCARDS_START
+            [{"front": "Term", "back": "Definition"}]
+            FLASHCARDS_END
+            TASKS_START
+            [{"title": "Task", "due_date": "2025-01-01"}]
+            TASKS_END
             """
+
+            if ext in ['pdf', 'txt']:
+                text_content = extract_text_from_pdf(temp_filename)
+                gemini_inputs = [prompt, text_content]
+            else:
+                audio_file = genai.upload_file(temp_filename)
+                while audio_file.state.name == "PROCESSING":
+                    await asyncio.sleep(1)
+                    audio_file = genai.get_file(audio_file.name)
+                gemini_inputs = [prompt, audio_file]
+
+            # 3. Generate (With Retry)
+            text = ""
+            for attempt in range(3):
+                try:
+                    result = model.generate_content(gemini_inputs)
+                    text = result.text
+                    break
+                except Exception as e:
+                    if "429" in str(e):
+                        print(f"   ⏳ Upload Rate Limit. Waiting 20s... (Attempt {attempt+1}/3)")
+                        await asyncio.sleep(20)
+                    else: raise e
+
+            # 4. Parse & Save
+            # (Parsing logic shortened for brevity - same as V5)
+            try: transcript = text.split("TRANSCRIPT_START")[1].split("TRANSCRIPT_END")[0].strip()
+            except: transcript = "Error parsing transcript."
             
-            # Add prompt to inputs
-            gemini_inputs.insert(0, final_prompt)
+            try: summary = text.split("SUMMARY_START")[1].split("SUMMARY_END")[0].strip()
+            except: summary = "Error parsing summary."
 
-            # 4. Generate Content
-            result = model.generate_content(gemini_inputs)
-            text = result.text
+            # Save Sub-Data
+            if "QUIZ_START" in text:
+                q_json = clean_and_parse_json(text.split("QUIZ_START")[1].split("QUIZ_END")[0])
+            else: q_json = []
 
-            # 5. Parse Response (Same logic for both!)
-            transcript = text.split("TRANSCRIPT_START")[1].split("TRANSCRIPT_END")[0].strip()
-            summary = text.split("SUMMARY_START")[1].split("SUMMARY_END")[0].strip()
-            
-            raw_quiz = text.split("QUIZ_START")[1].split("QUIZ_END")[0].strip()
-            raw_quiz = raw_quiz.replace("```json", "").replace("```", "").strip()
-            quiz_json = json.loads(raw_quiz)
+            if "FLASHCARDS_START" in text:
+                f_json = clean_and_parse_json(text.split("FLASHCARDS_START")[1].split("FLASHCARDS_END")[0])
+                for c in f_json: supabase.table('flashcards').insert({'note_id': note['id'], 'front': c['front'], 'back': c['back']}).execute()
 
-            # 6. Save to DB
+            if "TASKS_START" in text:
+                t_json = clean_and_parse_json(text.split("TASKS_START")[1].split("TASKS_END")[0])
+                for t in t_json: supabase.table('study_tasks').insert({'user_id': note['user_id'], 'title': t['title'], 'due_date': t.get('due_date'), 'origin_note_id': note['id']}).execute()
+
+            # Final Update
             supabase.table('notes').update({
-                "transcript": transcript,
-                "summary": summary,
-                "quiz": quiz_json,
-                "status": "Done"
+                "transcript": transcript, "summary": summary, "quiz": q_json, "status": "Done"
             }).eq("id", note['id']).execute()
-
-            print("   ✅ Note Processed Successfully!")
-            
-            # Cleanup
-            if os.path.exists(temp_filename):
-                os.remove(temp_filename)
+            print("   ✅ Upload Processed!")
 
         except Exception as e:
-            print(f"   ❌ Error: {e}")
+            print(f"   ❌ Upload Error: {e}")
             supabase.table('notes').update({"status": "Error"}).eq("id", note['id']).execute()
-            # Cleanup on error too
-            if os.path.exists(temp_filename):
-                os.remove(temp_filename)
+        
+        finally:
+            if os.path.exists(temp_filename): os.remove(temp_filename)
 
 async def process_chat_queue():
-    """Listens for new chat questions."""
-    try:
-        response = supabase.table('chat_messages').select("*").is_('response', 'null').execute()
-        messages = response.data
+    """Handles chat messages quickly."""
+    response = supabase.table('chat_messages').select("*").is_('response', 'null').execute()
+    if not response.data: return
 
-        for msg in messages:
-            print(f"💬 Chat Question: {msg['question']}")
-            
-            # Get Context
-            note_response = supabase.table('notes').select("transcript").eq("id", msg['note_id']).execute()
-            if not note_response.data:
+    for msg in response.data:
+        print(f"💬 Chatting: {msg['question']}")
+        
+        try:
+            # 1. Get Context
+            note = supabase.table('notes').select("transcript").eq("id", msg['note_id']).single().execute()
+            if not note.data: 
+                print("   ⚠️ Note not found for chat.")
                 continue
-                
-            transcript = note_response.data[0]['transcript']
-
-            # Ask Gemini
-            prompt = f"""
-            Context: {transcript[:20000]} 
-            Question: {msg['question']}
-            Answer the question based ONLY on the context. Keep it short and helpful.
-            """
             
-            ai_response = model.generate_content(prompt).text
+            transcript = note.data['transcript']
+            prompt = f"Context: {transcript[:15000]}\nStudent Question: {msg['question']}\n\nAnswer cleanly and concisely:"
 
-            # Save Answer
-            supabase.table('chat_messages').update({
-                "response": ai_response
-            }).eq("id", msg['id']).execute()
+            # 2. Generate Answer (With Retry!)
+            answer = ""
+            for attempt in range(3):
+                try:
+                    result = model.generate_content(prompt)
+                    answer = result.text
+                    break
+                except Exception as e:
+                    if "429" in str(e):
+                        print(f"   ⏳ Chat Rate Limit. Waiting 5s... (Attempt {attempt+1}/3)")
+                        await asyncio.sleep(5)
+                    else: raise e
             
+            if not answer: answer = "I'm having trouble connecting to the AI right now. Please try again."
+
+            # 3. Send Answer
+            supabase.table('chat_messages').update({"response": answer}).eq("id", msg['id']).execute()
             print("   ✅ Answer Sent!")
-            
-    except Exception as e:
-        print(f"   ⚠️ Chat Error: {e}")
 
+        except Exception as e:
+            print(f"   ⚠️ Chat Error: {e}")
+
+# --- MAIN LOOP ---
 async def main_loop():
     while True:
-        await process_new_uploads()
-        await process_chat_queue()
-        await asyncio.sleep(2)
+        # Run BOTH tasks at the same time (Parallel)
+        await asyncio.gather(
+            process_new_uploads(),
+            process_chat_queue()
+        )
+        await asyncio.sleep(1) # Fast tick for responsiveness
 
 if __name__ == "__main__":
     asyncio.run(main_loop())

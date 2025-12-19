@@ -43,6 +43,7 @@ dependencies:
   google_fonts: ^6.1.0
   flutter_sound: ^9.30.0
   flutter_markdown: ^0.7.7+1
+  flip_card: ^0.7.0
 
 dev_dependencies:
   flutter_test:
