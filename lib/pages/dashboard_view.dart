@@ -242,13 +242,24 @@ class _DashboardViewState extends State<DashboardView> {
             ),
           ),
 
-          // 3. NEW: TASKS SECTION
+          // 3. NEW: TASKS SECTION (With Filter Fix)
           StreamBuilder<List<Map<String, dynamic>>>(
             stream: _tasksStream,
             builder: (context, snapshot) {
-              if (!snapshot.hasData || snapshot.data!.isEmpty) return const SizedBox.shrink(); // Hide if empty
+              if (!snapshot.hasData) return const SizedBox.shrink();
+
+              // --- FIX: Client-Side Filtering ---
+              final allTasks = snapshot.data!;
+              final tasks = allTasks.where((t) => t['is_completed'] == false).toList();
+              // ----------------------------------
               
-              final tasks = snapshot.data!;
+              if (tasks.isEmpty) {
+  return const Padding(
+    padding: EdgeInsets.all(20),
+    child: Text("No upcoming tasks! 🎉", style: TextStyle(color: Color.fromARGB(179, 0, 0, 0))),
+  );
+}
+              
               return Container(
                 height: 140, // Fixed height for task scroller
                 margin: const EdgeInsets.only(top: 20),
