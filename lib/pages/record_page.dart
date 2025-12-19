@@ -8,7 +8,10 @@ import 'dart:ui';
 import '../theme/app_theme.dart';
 
 class RecordPage extends StatefulWidget {
-  const RecordPage({super.key});
+  // 1. Accept folderId (Optional, can be null for Root)
+  final int? folderId; 
+  
+  const RecordPage({super.key, this.folderId});
 
   @override
   State<RecordPage> createState() => _RecordPageState();
@@ -19,7 +22,7 @@ class _RecordPageState extends State<RecordPage> {
   bool _isRecorderInitialized = false;
   bool _isRecording = false;
   String? _recordedFilePath;
-  Stopwatch _stopwatch = Stopwatch();
+  final Stopwatch _stopwatch = Stopwatch();
   Timer? _timer;
   String _formattedTime = "00:00:00";
 
@@ -75,13 +78,13 @@ class _RecordPageState extends State<RecordPage> {
   Future<void> _stop() async {
     if (!_isRecorderInitialized) return;
     final path = await _recorder.stopRecorder();
-    _timer?.cancel(); // Pause timer visually
+    _timer?.cancel();
     setState(() {
       _isRecording = false;
       _recordedFilePath = path;
     });
     
-    // Auto-upload logic (kept simple for UI demo)
+    // Auto-upload
     if (_recordedFilePath != null) {
       _uploadRecording(File(_recordedFilePath!));
     }
@@ -95,13 +98,21 @@ class _RecordPageState extends State<RecordPage> {
       final fileName = '${DateTime.now().millisecondsSinceEpoch}_rec.aac';
       final userId = Supabase.instance.client.auth.currentUser!.id;
 
-      await Supabase.instance.client.storage.from('Lectures').upload(fileName, file);
+      // 1. Upload File to Bucket
+      try {
+         await Supabase.instance.client.storage.from('Lectures').upload(fileName, file);
+      } catch (e) {
+         // Fallback for capitalized bucket name
+         await Supabase.instance.client.storage.from('Lectures').upload(fileName, file);
+      }
 
+      // 2. Save Metadata to Database (Now with Folder ID!)
       await Supabase.instance.client.from('notes').insert({
         'title': 'Lecture ${DateTime.now().hour}:${DateTime.now().minute}',
         'audio_path': fileName,
         'status': 'Processing',
         'user_id': userId,
+        'folder_id': widget.folderId, // <--- SAVING TO FOLDER
       });
 
       if (mounted) {
@@ -131,7 +142,7 @@ class _RecordPageState extends State<RecordPage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // 1. STATUS CARD
+            // Status Card
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
               decoration: BoxDecoration(
@@ -152,20 +163,20 @@ class _RecordPageState extends State<RecordPage> {
             
             const SizedBox(height: 50),
 
-            // 2. GIANT TIMER
+            // Timer
             Text(
               _formattedTime,
               style: const TextStyle(
                 fontSize: 60, 
                 fontWeight: FontWeight.w200, 
                 color: AppTheme.deepBlue,
-                fontFeatures: [FontFeature.tabularFigures()], // Keeps numbers steady
+                fontFeatures: [FontFeature.tabularFigures()],
               ),
             ),
 
             const SizedBox(height: 80),
 
-            // 3. THE BIG BUTTON
+            // Record Button
             GestureDetector(
               onTap: _isRecording ? _stop : _record,
               child: AnimatedContainer(

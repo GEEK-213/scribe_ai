@@ -15,19 +15,138 @@ class DashboardView extends StatefulWidget {
 
 class _DashboardViewState extends State<DashboardView> {
   final _userId = Supabase.instance.client.auth.currentUser?.id;
+  int _selectedFolderId = -1; 
 
-  late final _notesStream = Supabase.instance.client
-      .from('notes')
-      .stream(primaryKey: ['id'])
-      .eq('user_id', _userId ?? '')
-      .order('created_at', ascending: false);
+  Stream<List<Map<String, dynamic>>> get _foldersStream {
+    return Supabase.instance.client
+        .from('folders')
+        .stream(primaryKey: ['id'])
+        .eq('user_id', _userId ?? '')
+        .order('created_at');
+  }
+
+  Stream<List<Map<String, dynamic>>> get _notesStream {
+    return Supabase.instance.client
+        .from('notes')
+        .stream(primaryKey: ['id'])
+        .eq('user_id', _userId ?? '')
+        .order('created_at', ascending: false);
+  }
+
+  Future<void> _createFolder() async {
+    final controller = TextEditingController();
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("New Folder"),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(hintText: "Folder Name"),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+          ElevatedButton(
+            onPressed: () async {
+              if (controller.text.isNotEmpty) {
+                await Supabase.instance.client.from('folders').insert({
+                  'name': controller.text,
+                  'user_id': _userId,
+                });
+                if (mounted) Navigator.pop(context);
+              }
+            },
+            child: const Text("Create"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _renameNote(String noteId, String currentTitle) async {
+    final controller = TextEditingController(text: currentTitle);
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Rename File"),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(hintText: "Enter new name"),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+          ElevatedButton(
+            onPressed: () async {
+              if (controller.text.isNotEmpty) {
+                await Supabase.instance.client
+                    .from('notes')
+                    .update({'title': controller.text})
+                    .eq('id', noteId);
+                if (mounted) Navigator.pop(context);
+              }
+            },
+            child: const Text("Save"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- NEW: Move Note Logic ---
+  Future<void> _moveNote(int noteId) async {
+    // 1. Get list of current folders
+    final folders = await Supabase.instance.client
+        .from('folders')
+        .select()
+        .eq('user_id', _userId!);
+
+    if (!mounted) return;
+
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return SimpleDialog(
+          title: const Text('Move to...'),
+          children: [
+            // Option: Remove from any folder (Back to All Notes)
+            SimpleDialogOption(
+              onPressed: () async {
+                await Supabase.instance.client
+                    .from('notes')
+                    .update({'folder_id': null}) 
+                    .eq('id', noteId);
+                if (mounted) Navigator.pop(context);
+              },
+              child: const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8.0),
+                child: Row(children: [Icon(Icons.folder_off, color: Colors.grey), SizedBox(width: 10), Text("Remove from Folder")]),
+              ),
+            ),
+            const Divider(),
+            // Option: List existing folders
+            ...folders.map((folder) => SimpleDialogOption(
+              onPressed: () async {
+                await Supabase.instance.client
+                    .from('notes')
+                    .update({'folder_id': folder['id']})
+                    .eq('id', noteId);
+                if (mounted) Navigator.pop(context);
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8.0),
+                child: Row(children: [const Icon(Icons.folder, color: Colors.blue), const SizedBox(width: 10), Text(folder['name'])]),
+              ),
+            )),
+          ],
+        );
+      }
+    );
+  }
 
   Future<void> _pickAndUploadFile() async {
     try {
-     FilePickerResult? result = await FilePicker.platform.pickFiles(
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-       
-        allowedExtensions: ['mp3', 'm4a', 'wav', 'mp4', 'mkv', 'pdf', 'txt', 'docx', 'pptx', 'xlsx', 'avi', 'flac', 'mov', 'wmv', 'ogg', 'webm', 'rtf', 'odt'], 
+        allowedExtensions: ['mp3', 'm4a', 'wav', 'pdf', 'txt', 'docx'], 
       );
       if (result == null) return;
 
@@ -43,52 +162,67 @@ class _DashboardViewState extends State<DashboardView> {
         'audio_path': fileName,
         'status': 'Processing',
         'user_id': _userId,
+        'folder_id': _selectedFolderId == -1 ? null : _selectedFolderId,
       });
       
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Success! AI is processing.')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Success! Processing.')));
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
     }
   }
-@override
+
+  @override
   Widget build(BuildContext context) {
-    // 1. WRAP EVERYTHING IN A CONTAINER WITH GRADIENT
     return Container(
       decoration: const BoxDecoration(
-        gradient: AppTheme.mainGradient, // <--- The "Ice & Water" Background
+        gradient: AppTheme.mainGradient, 
       ),
       child: Column(
         children: [
-          // 2. HEADER (I kept it Blue for now, but added a shadow)
+          // Header
           Container(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.fromLTRB(20, 50, 20, 20),
             decoration: BoxDecoration(
-              color: AppTheme.primaryBlue, // Used your Theme Color
+              color: AppTheme.primaryBlue,
               borderRadius: const BorderRadius.only(
                 bottomLeft: Radius.circular(30),
                 bottomRight: Radius.circular(30)
               ),
               boxShadow: [
-                BoxShadow(
-                  color: Colors.blue.withOpacity(0.3),
-                  blurRadius: 10,
-                  offset: const Offset(0, 5),
-                )
+                BoxShadow(color: Colors.blue.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 5))
               ],
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text("Welcome Back! 👋", style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 10),
-                const Text("Let's crush your studies today.", style: TextStyle(color: Colors.white70, fontSize: 14)),
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    _buildStatCard("Lectures", "Checking...", Icons.mic),
-                    const SizedBox(width: 10),
-                    _buildStatCard("Avg Quiz", "85%", Icons.emoji_events),
-                  ],
+                const Text("My Library 📚", style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 15),
+                
+                SizedBox(
+                  height: 40,
+                  child: StreamBuilder<List<Map<String, dynamic>>>(
+                    stream: _foldersStream,
+                    builder: (context, snapshot) {
+                      if (!snapshot.hasData) return const SizedBox();
+                      final folders = snapshot.data!;
+                      
+                      return ListView(
+                        scrollDirection: Axis.horizontal,
+                        children: [
+                          _buildFolderChip("All Notes", -1),
+                          ...folders.map((folder) => _buildFolderChip(folder['name'], folder['id'])),
+                          Padding(
+                            padding: const EdgeInsets.only(left: 8.0),
+                            child: IconButton(
+                              onPressed: _createFolder, 
+                              icon: const Icon(Icons.add_circle, color: Colors.white70),
+                              tooltip: "Create Folder",
+                            ),
+                          )
+                        ],
+                      );
+                    },
+                  ),
                 ),
               ],
             ),
@@ -96,7 +230,7 @@ class _DashboardViewState extends State<DashboardView> {
           
           const SizedBox(height: 15),
 
-          // 3. ACTION BUTTONS
+          // Buttons
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Row(
@@ -109,8 +243,7 @@ class _DashboardViewState extends State<DashboardView> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.redAccent, 
                       foregroundColor: Colors.white, 
-                      padding: const EdgeInsets.symmetric(vertical: 15), // Taller buttons
-                      elevation: 4,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
                     ),
                   ),
@@ -123,9 +256,8 @@ class _DashboardViewState extends State<DashboardView> {
                     label: const Text("Upload"),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.white, 
-                      foregroundColor: AppTheme.deepBlue, // Theme Color
-                      padding: const EdgeInsets.symmetric(vertical: 15),
-                      elevation: 4,
+                      foregroundColor: AppTheme.deepBlue,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
                     ),
                   ),
@@ -136,24 +268,35 @@ class _DashboardViewState extends State<DashboardView> {
 
           const SizedBox(height: 10),
 
-          // 4. LIST (Transparent so gradient shows)
+          // Notes List
           Expanded(
             child: StreamBuilder<List<Map<String, dynamic>>>(
               stream: _notesStream,
               builder: (context, snapshot) {
                 if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-                final notes = snapshot.data!;
+                
+                final allNotes = snapshot.data!;
+                final visibleNotes = _selectedFolderId == -1 
+                    ? allNotes 
+                    : allNotes.where((n) => n['folder_id'] == _selectedFolderId).toList();
 
-                if (notes.isEmpty) return const Center(child: Text("No Lectures yet."));
+                if (visibleNotes.isEmpty) {
+                   return Center(
+                     child: Text(
+                       _selectedFolderId == -1 ? "No Lectures yet." : "This folder is empty.",
+                       style: const TextStyle(color: Colors.grey),
+                     ),
+                   );
+                }
 
                 return ListView.builder(
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                  itemCount: notes.length,
+                  itemCount: visibleNotes.length,
                   itemBuilder: (context, index) {
-                    final note = notes[index];
+                    final note = visibleNotes[index];
                     final isDone = note['status'] == 'Done';
+                    
                     return Card(
-                      // Using the Theme Card style automatically!
                       margin: const EdgeInsets.only(bottom: 12),
                       child: ListTile(
                         leading: CircleAvatar(
@@ -162,6 +305,40 @@ class _DashboardViewState extends State<DashboardView> {
                         ),
                         title: Text(note['title'] ?? 'Untitled', style: const TextStyle(fontWeight: FontWeight.bold)),
                         subtitle: Text(isDone ? "Tap to review" : "AI Processing...", style: const TextStyle(fontSize: 12)),
+                        
+                        // Menu with Rename AND Move
+                        trailing: PopupMenuButton<String>(
+                          onSelected: (value) {
+                            if (value == 'rename') {
+                              _renameNote(note['id'].toString(), note['title'] ?? '');
+                            } else if (value == 'move') {
+                              _moveNote(note['id']);
+                            }
+                          },
+                          itemBuilder: (context) => [
+                            const PopupMenuItem(
+                              value: 'rename',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.edit, color: Colors.blue, size: 20),
+                                  SizedBox(width: 10),
+                                  Text("Rename"),
+                                ],
+                              ),
+                            ),
+                            const PopupMenuItem(
+                              value: 'move',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.drive_file_move, color: Colors.orange, size: 20),
+                                  SizedBox(width: 10),
+                                  Text("Move to..."),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+
                         onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => NoteDetailsPage(noteId: note['id'], title: note['title'] ?? 'Lecture'))),
                       ),
                     );
@@ -174,37 +351,30 @@ class _DashboardViewState extends State<DashboardView> {
       ),
     );
   }
-  Widget _buildStatCard(String title, String value, IconData icon) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(15),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.9),
-          borderRadius: BorderRadius.circular(15),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.blue.withOpacity(0.1),
-              blurRadius: 8,
-              offset: const Offset(0, 4),
-            )
-          ],
+
+  Widget _buildFolderChip(String label, int id) {
+    final isSelected = _selectedFolderId == id;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8.0),
+      child: ChoiceChip(
+        label: Text(label),
+        selected: isSelected,
+        onSelected: (selected) {
+          if (selected) {
+            setState(() {
+              _selectedFolderId = id;
+            });
+          }
+        },
+        selectedColor: Colors.white,
+        backgroundColor: Colors.white.withOpacity(0.2),
+        labelStyle: TextStyle(
+          color: isSelected ? AppTheme.deepBlue : Colors.white,
+          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
         ),
-        child: Row(
-          children: [
-            CircleAvatar(
-              backgroundColor: AppTheme.deepBlue.withOpacity(0.1),
-              child: Icon(icon, color: AppTheme.deepBlue),
-            ),
-            const SizedBox(width: 10),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: const TextStyle(fontSize: 12, color: Colors.black54)),
-                const SizedBox(height: 5),
-                Text(value, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
-              ],
-            ),
-          ],
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: isSelected ? Colors.white : Colors.transparent)
         ),
       ),
     );
