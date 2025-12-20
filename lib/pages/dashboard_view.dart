@@ -16,6 +16,8 @@ class DashboardView extends StatefulWidget {
 class _DashboardViewState extends State<DashboardView> {
   final _userId = Supabase.instance.client.auth.currentUser?.id;
   int _selectedFolderId = -1; 
+  String _searchQuery = ""; // 🔍 Search State
+  final TextEditingController _searchController = TextEditingController();
 
   // --- STREAMS ---
   Stream<List<Map<String, dynamic>>> get _foldersStream {
@@ -34,7 +36,6 @@ class _DashboardViewState extends State<DashboardView> {
         .order('created_at', ascending: false);
   }
 
-  // NEW: Stream for Tasks
   Stream<List<Map<String, dynamic>>> get _tasksStream {
     return Supabase.instance.client
         .from('study_tasks')
@@ -148,7 +149,6 @@ class _DashboardViewState extends State<DashboardView> {
     }
   }
 
-  // NEW: Mark Task as Complete
   Future<void> _toggleTask(int taskId) async {
     await Supabase.instance.client
         .from('study_tasks')
@@ -162,7 +162,7 @@ class _DashboardViewState extends State<DashboardView> {
       decoration: const BoxDecoration(gradient: AppTheme.mainGradient),
       child: Column(
         children: [
-          // 1. HEADER
+          // 1. HEADER WITH SEARCH
           Container(
             padding: const EdgeInsets.fromLTRB(20, 50, 20, 20),
             decoration: BoxDecoration(
@@ -175,6 +175,30 @@ class _DashboardViewState extends State<DashboardView> {
               children: [
                 const Text("My Library 📚", style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 15),
+                
+                // 🔍 SEARCH BAR 
+                Container(
+                  height: 45,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(15),
+                  ),
+                  child: TextField(
+                    controller: _searchController,
+                    style: const TextStyle(color: Colors.white),
+                    onChanged: (val) => setState(() => _searchQuery = val.toLowerCase()),
+                    decoration: const InputDecoration(
+                      hintText: "Search notes...",
+                      hintStyle: TextStyle(color: Colors.white60),
+                      prefixIcon: Icon(Icons.search, color: Colors.white70),
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.symmetric(vertical: 10)
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 15),
+
                 // Folder List
                 SizedBox(
                   height: 40,
@@ -242,26 +266,18 @@ class _DashboardViewState extends State<DashboardView> {
             ),
           ),
 
-          // 3. NEW: TASKS SECTION (With Filter Fix)
+          // 3. TASKS SECTION (Fixed Logic)
           StreamBuilder<List<Map<String, dynamic>>>(
             stream: _tasksStream,
             builder: (context, snapshot) {
               if (!snapshot.hasData) return const SizedBox.shrink();
-
-              // --- FIX: Client-Side Filtering ---
-              final allTasks = snapshot.data!;
-              final tasks = allTasks.where((t) => t['is_completed'] == false).toList();
-              // ----------------------------------
               
-              if (tasks.isEmpty) {
-  return const Padding(
-    padding: EdgeInsets.all(20),
-    child: Text("No upcoming tasks! 🎉", style: TextStyle(color: Color.fromARGB(179, 0, 0, 0))),
-  );
-}
+              // Filter out completed tasks
+              final tasks = snapshot.data!.where((t) => t['is_completed'] == false).toList();
+              if (tasks.isEmpty) return const SizedBox.shrink(); 
               
               return Container(
-                height: 140, // Fixed height for task scroller
+                height: 140, 
                 margin: const EdgeInsets.only(top: 20),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -322,7 +338,7 @@ class _DashboardViewState extends State<DashboardView> {
              child: Align(alignment: Alignment.centerLeft, child: Text("Recent Files", style: TextStyle(color: Colors.white70, fontSize: 14))),
           ),
 
-          // 4. NOTES LIST
+          // 4. NOTES LIST (With Filtering Logic)
           Expanded(
             child: StreamBuilder<List<Map<String, dynamic>>>(
               stream: _notesStream,
@@ -330,12 +346,22 @@ class _DashboardViewState extends State<DashboardView> {
                 if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
                 
                 final allNotes = snapshot.data!;
-                final visibleNotes = _selectedFolderId == -1 
+                
+                // --- FILTERING LOGIC ---
+                var visibleNotes = _selectedFolderId == -1 
                     ? allNotes 
                     : allNotes.where((n) => n['folder_id'] == _selectedFolderId).toList();
 
+                if (_searchQuery.isNotEmpty) {
+                  visibleNotes = visibleNotes.where((n) {
+                    final title = (n['title'] ?? '').toString().toLowerCase();
+                    return title.contains(_searchQuery);
+                  }).toList();
+                }
+                // -----------------------
+
                 if (visibleNotes.isEmpty) {
-                   return Center(child: Text(_selectedFolderId == -1 ? "No Lectures yet." : "This folder is empty.", style: const TextStyle(color: Colors.white70)));
+                   return const Center(child: Text("No notes found.", style: TextStyle(color: Colors.white70)));
                 }
 
                 return ListView.builder(
