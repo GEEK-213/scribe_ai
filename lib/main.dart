@@ -3,7 +3,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'theme/app_theme.dart';
 import 'pages/login_page.dart';
 import 'pages/dashboard_view.dart'; 
-
+import 'pages/chat_selection_page.dart';
+import 'pages/profile_view.dart';
+import 'pages/home_page.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -28,7 +30,7 @@ class LumenApp extends StatelessWidget {
       // Check if user is logged in
       home: Supabase.instance.client.auth.currentUser == null
           ? const LoginPage()
-          : const DashboardView(), 
+          : const HomePage(), 
     );
   }
 }

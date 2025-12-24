@@ -99,11 +99,12 @@ class _DashboardViewState extends State<DashboardView> {
   // --- MAIN UI ---
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppTheme.backgroundDark,
-      body: Stack(
+    // 1. REMOVE SCAFFOLD: We use a Container/Stack because HomePage already has the Scaffold
+    return Container(
+      color: AppTheme.backgroundDark,
+      child: Stack(
         children: [
-          // 1. BACKGROUND ORBS (Ambient Glow)
+          // A. BACKGROUND ORBS (Ambient Glow)
           Positioned(
             top: -100, left: -100,
             child: _buildOrb(300, const Color(0xFF2B8CEE).withOpacity(0.4)), // Primary Blue
@@ -113,25 +114,25 @@ class _DashboardViewState extends State<DashboardView> {
             child: _buildOrb(400, const Color(0xFF4AA3FF).withOpacity(0.2)), // Light Blue
           ),
 
-          // 2. MAIN SCROLL VIEW
+          // B. MAIN SCROLL VIEW
           SafeArea(
-            bottom: false, // Allow content behind nav bar
+            bottom: false, 
             child: CustomScrollView(
               physics: const BouncingScrollPhysics(),
               slivers: [
-                // A. Header
+                // Header
                 SliverToBoxAdapter(child: _buildHeader()),
 
-                // B. Search Bar
+                // Search Bar
                 SliverToBoxAdapter(child: _buildSearchBar()),
 
-                // C. Quick Stats
+                // Quick Stats
                 SliverToBoxAdapter(child: _buildQuickStats()),
 
-                // D. Folders / Subjects
+                // Folders / Subjects
                 SliverToBoxAdapter(child: _buildSubjectChips()),
 
-                // E. Section Title
+                // Section Title
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
@@ -139,7 +140,7 @@ class _DashboardViewState extends State<DashboardView> {
                   ),
                 ),
 
-                // F. Notes List
+                // Notes List
                 StreamBuilder<List<Map<String, dynamic>>>(
                   stream: _notesStream,
                   builder: (context, snapshot) {
@@ -163,15 +164,17 @@ class _DashboardViewState extends State<DashboardView> {
                   },
                 ),
 
-                // Spacer for Bottom Nav
-                const SliverPadding(padding: EdgeInsets.only(bottom: 120)),
+                // Spacer at bottom so content isn't hidden by Floating Button
+                const SliverPadding(padding: EdgeInsets.only(bottom: 100)),
               ],
             ),
           ),
 
-          // 3. FLOATING ACTION BUTTON (Mic)
+          // C. FLOATING ACTION BUTTON (Mic)
+          // We keep this Positioned because it floats over the content
           Positioned(
-            bottom: 100, right: 24,
+            bottom: 20, // Adjusted to sit just above the Main Bottom Bar
+            right: 24,
             child: GestureDetector(
               onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RecordPage())),
               child: Container(
@@ -187,11 +190,8 @@ class _DashboardViewState extends State<DashboardView> {
             ),
           ),
 
-          // 4. GLASS BOTTOM NAVIGATION
-          Positioned(
-            bottom: 0, left: 0, right: 0,
-            child: _buildGlassBottomNav(),
-          ),
+          // 4. REMOVED GLASS NAVBAR
+          // The navbar is now handled by home_page.dart
         ],
       ),
     );
@@ -473,49 +473,6 @@ class _DashboardViewState extends State<DashboardView> {
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildGlassBottomNav() {
-    return ClipRRect(
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-        child: Container(
-          height: 80,
-          decoration: BoxDecoration(
-            color: const Color(0xFF0F172A).withOpacity(0.8),
-            border: Border(top: BorderSide(color: Colors.white.withOpacity(0.1))),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _navItem(Icons.home_filled, "Home", true),
-              _navItem(Icons.library_books_outlined, "Library", false),
-              const SizedBox(width: 40), // Space for FAB
-              _navItem(Icons.insights, "Insights", false),
-              _navItem(Icons.person_outline, "Profile", false),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _navItem(IconData icon, String label, bool isActive) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: isActive ? Colors.white.withOpacity(0.1) : Colors.transparent,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(icon, color: isActive ? AppTheme.primaryBlue : Colors.white.withOpacity(0.5)),
-        ),
-        const SizedBox(height: 4),
-        Text(label, style: TextStyle(color: isActive ? Colors.white : Colors.white.withOpacity(0.5), fontSize: 10, fontWeight: FontWeight.w500)),
-      ],
     );
   }
 
