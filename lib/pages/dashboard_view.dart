@@ -1,10 +1,11 @@
+import 'dart:ui';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:file_picker/file_picker.dart';
+import '../theme/app_theme.dart';
 import 'record_page.dart';
 import 'note_details_page.dart';
-import 'package:file_picker/file_picker.dart';
-import 'dart:io';
-import '../theme/app_theme.dart';
 
 class DashboardView extends StatefulWidget {
   const DashboardView({super.key});
@@ -15,385 +16,301 @@ class DashboardView extends StatefulWidget {
 
 class _DashboardViewState extends State<DashboardView> {
   final _userId = Supabase.instance.client.auth.currentUser?.id;
-  int _selectedFolderId = -1; 
-  String _searchQuery = ""; // 🔍 Search State
-  final TextEditingController _searchController = TextEditingController();
+  int _selectedFolderId = -1; // -1 represents "All"
+  String _searchQuery = "";
 
   // --- STREAMS ---
-  Stream<List<Map<String, dynamic>>> get _foldersStream {
-    return Supabase.instance.client
-        .from('folders')
-        .stream(primaryKey: ['id'])
-        .eq('user_id', _userId ?? '')
-        .order('created_at');
-  }
+  Stream<List<Map<String, dynamic>>> get _foldersStream =>
+      Supabase.instance.client.from('folders').stream(primaryKey: ['id']).eq('user_id', _userId ?? '').order('created_at');
 
-  Stream<List<Map<String, dynamic>>> get _notesStream {
-    return Supabase.instance.client
-        .from('notes')
-        .stream(primaryKey: ['id'])
-        .eq('user_id', _userId ?? '')
-        .order('created_at', ascending: false);
-  }
+  Stream<List<Map<String, dynamic>>> get _notesStream =>
+      Supabase.instance.client.from('notes').stream(primaryKey: ['id']).eq('user_id', _userId ?? '').order('created_at', ascending: false);
 
-  Stream<List<Map<String, dynamic>>> get _tasksStream {
-    return Supabase.instance.client
-        .from('study_tasks')
-        .stream(primaryKey: ['id'])
-        .eq('user_id', _userId ?? '')
-        .order('id', ascending: false);
-  }
+  Stream<List<Map<String, dynamic>>> get _tasksStream =>
+      Supabase.instance.client.from('study_tasks').stream(primaryKey: ['id']).eq('user_id', _userId ?? '').order('id', ascending: false);
 
   // --- ACTIONS ---
-  Future<void> _createFolder() async {
-    final controller = TextEditingController();
-    await showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("New Folder"),
-        content: TextField(controller: controller, decoration: const InputDecoration(hintText: "Folder Name")),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
-          ElevatedButton(
-            onPressed: () async {
-              if (controller.text.isNotEmpty) {
-                await Supabase.instance.client.from('folders').insert({'name': controller.text, 'user_id': _userId});
-                if (mounted) Navigator.pop(context);
-              }
-            },
-            child: const Text("Create"),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _renameNote(String noteId, String currentTitle) async {
-    final controller = TextEditingController(text: currentTitle);
-    await showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Rename File"),
-        content: TextField(controller: controller, decoration: const InputDecoration(hintText: "New Name")),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
-          ElevatedButton(
-            onPressed: () async {
-              if (controller.text.isNotEmpty) {
-                await Supabase.instance.client.from('notes').update({'title': controller.text}).eq('id', noteId);
-                if (mounted) Navigator.pop(context);
-              }
-            },
-            child: const Text("Save"),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _moveNote(int noteId) async {
-    final folders = await Supabase.instance.client.from('folders').select().eq('user_id', _userId!);
-    if (!mounted) return;
-
-    await showDialog(
-      context: context,
-      builder: (context) => SimpleDialog(
-        title: const Text('Move to...'),
-        children: [
-          SimpleDialogOption(
-            onPressed: () async {
-              await Supabase.instance.client.from('notes').update({'folder_id': null}).eq('id', noteId);
-              if (mounted) Navigator.pop(context);
-            },
-            child: const Padding(padding: EdgeInsets.all(8.0), child: Row(children: [Icon(Icons.folder_off, color: Colors.grey), SizedBox(width: 10), Text("Remove from Folder")])),
-          ),
-          const Divider(),
-          ...folders.map((f) => SimpleDialogOption(
-            onPressed: () async {
-              await Supabase.instance.client.from('notes').update({'folder_id': f['id']}).eq('id', noteId);
-              if (mounted) Navigator.pop(context);
-            },
-            child: Padding(padding: const EdgeInsets.all(8.0), child: Row(children: [const Icon(Icons.folder, color: Colors.blue), const SizedBox(width: 10), Text(f['name'])])),
-          )),
-        ],
-      ),
-    );
-  }
 
   Future<void> _pickAndUploadFile() async {
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['mp3', 'm4a', 'wav', 'pdf', 'txt', 'docx'], 
+        allowedExtensions: ['mp3', 'm4a', 'wav', 'pdf', 'txt', 'docx'],
       );
       if (result == null) return;
 
       final file = File(result.files.single.path!);
       final fileName = '${DateTime.now().millisecondsSinceEpoch}_upload.${result.files.single.extension}';
 
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Uploading...')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Uploading to Lumen Cloud...')));
 
+      // Upload to Storage
       await Supabase.instance.client.storage.from('Lectures').upload(fileName, file);
 
+      // Insert into Database
       await Supabase.instance.client.from('notes').insert({
-        'title': 'Upload ${DateTime.now().hour}:${DateTime.now().minute}',
+        'title': result.files.single.name,
         'audio_path': fileName,
-        'status': 'Processing',
+        'status': 'Processing', // Triggers AI
         'user_id': _userId,
         'folder_id': _selectedFolderId == -1 ? null : _selectedFolderId,
       });
-      
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Success! AI is processing.')));
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
     }
   }
 
-  Future<void> _toggleTask(int taskId) async {
-    await Supabase.instance.client
-        .from('study_tasks')
-        .update({'is_completed': true})
-        .eq('id', taskId);
+  Future<void> _createFolderDialog() async {
+    final controller = TextEditingController();
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E293B), // Dark Slate
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: BorderSide(color: Colors.white.withOpacity(0.1))),
+        title: const Text("New Subject", style: TextStyle(color: Colors.white)),
+        content: TextField(
+          controller: controller,
+          style: const TextStyle(color: Colors.white),
+          decoration: InputDecoration(
+            hintText: "e.g., Physics, History",
+            hintStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
+            filled: true,
+            fillColor: Colors.black.withOpacity(0.2),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel", style: TextStyle(color: Colors.grey))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryBlue, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+            onPressed: () async {
+              if (controller.text.isNotEmpty) {
+                await Supabase.instance.client.from('folders').insert({'name': controller.text, 'user_id': _userId});
+                if (mounted) Navigator.pop(context);
+              }
+            },
+            child: const Text("Create", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
   }
 
+  // --- MAIN UI ---
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(gradient: AppTheme.mainGradient),
-      child: Column(
+    return Scaffold(
+      backgroundColor: AppTheme.backgroundDark,
+      body: Stack(
         children: [
-          // 1. HEADER WITH SEARCH
-          Container(
-            padding: const EdgeInsets.fromLTRB(20, 50, 20, 20),
-            decoration: BoxDecoration(
-              color: AppTheme.primaryBlue,
-              borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(30), bottomRight: Radius.circular(30)),
-              boxShadow: [BoxShadow(color: Colors.blue.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 5))],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text("My Library 📚", style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 15),
-                
-                // 🔍 SEARCH BAR 
-                Container(
-                  height: 45,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(15),
-                  ),
-                  child: TextField(
-                    controller: _searchController,
-                    style: const TextStyle(color: Colors.white),
-                    onChanged: (val) => setState(() => _searchQuery = val.toLowerCase()),
-                    decoration: const InputDecoration(
-                      hintText: "Search notes...",
-                      hintStyle: TextStyle(color: Colors.white60),
-                      prefixIcon: Icon(Icons.search, color: Colors.white70),
-                      border: InputBorder.none,
-                      contentPadding: EdgeInsets.symmetric(vertical: 10)
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 15),
-
-                // Folder List
-                SizedBox(
-                  height: 40,
-                  child: StreamBuilder<List<Map<String, dynamic>>>(
-                    stream: _foldersStream,
-                    builder: (context, snapshot) {
-                      if (!snapshot.hasData) return const SizedBox();
-                      return ListView(
-                        scrollDirection: Axis.horizontal,
-                        children: [
-                          _buildFolderChip("All Notes", -1),
-                          ...snapshot.data!.map((f) => _buildFolderChip(f['name'], f['id'])),
-                          Padding(
-                            padding: const EdgeInsets.only(left: 8.0),
-                            child: IconButton(
-                              onPressed: _createFolder,
-                              icon: const Icon(Icons.add_circle, color: Colors.white70),
-                              tooltip: "Create Folder",
-                            ),
-                          )
-                        ],
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
+          // 1. BACKGROUND ORBS (Ambient Glow)
+          Positioned(
+            top: -100, left: -100,
+            child: _buildOrb(300, const Color(0xFF2B8CEE).withOpacity(0.4)), // Primary Blue
           ),
-          
-          const SizedBox(height: 15),
-
-          // 2. ACTION BUTTONS
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const RecordPage())),
-                    icon: const Icon(Icons.mic),
-                    label: const Text("Record"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.redAccent, 
-                      foregroundColor: Colors.white, 
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 15),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: _pickAndUploadFile,
-                    icon: const Icon(Icons.upload_file),
-                    label: const Text("Upload"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white, 
-                      foregroundColor: AppTheme.deepBlue,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                    ),
-                  ),
-                ),
-              ],
-            ),
+          Positioned(
+            bottom: 100, right: -100,
+            child: _buildOrb(400, const Color(0xFF4AA3FF).withOpacity(0.2)), // Light Blue
           ),
 
-          // 3. TASKS SECTION (Fixed Logic)
-          StreamBuilder<List<Map<String, dynamic>>>(
-            stream: _tasksStream,
-            builder: (context, snapshot) {
-              if (!snapshot.hasData) return const SizedBox.shrink();
-              
-              // Filter out completed tasks
-              final tasks = snapshot.data!.where((t) => t['is_completed'] == false).toList();
-              if (tasks.isEmpty) return const SizedBox.shrink(); 
-              
-              return Container(
-                height: 140, 
-                margin: const EdgeInsets.only(top: 20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                     const Padding(
-                       padding: EdgeInsets.symmetric(horizontal: 20),
-                       child: Text("Upcoming Tasks ⚡", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white)),
-                     ),
-                     const SizedBox(height: 10),
-                     Expanded(
-                       child: ListView.builder(
-                         scrollDirection: Axis.horizontal,
-                         padding: const EdgeInsets.symmetric(horizontal: 20),
-                         itemCount: tasks.length,
-                         itemBuilder: (context, index) {
-                           final task = tasks[index];
-                           return Container(
-                             width: 200,
-                             margin: const EdgeInsets.only(right: 10),
-                             padding: const EdgeInsets.all(12),
-                             decoration: BoxDecoration(
-                               color: Colors.white.withOpacity(0.9),
-                               borderRadius: BorderRadius.circular(15),
-                               boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 5)],
-                             ),
-                             child: Column(
-                               crossAxisAlignment: CrossAxisAlignment.start,
-                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                               children: [
-                                 Text(task['title'] ?? 'Task', maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold)),
-                                 Row(
-                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                   children: [
-                                     Text(task['due_date'] ?? 'No Date', style: const TextStyle(fontSize: 12, color: Colors.red)),
-                                     IconButton(
-                                       icon: const Icon(Icons.check_circle_outline, color: Colors.green),
-                                       onPressed: () => _toggleTask(task['id']),
-                                       tooltip: "Mark Complete",
-                                     )
-                                   ],
-                                 )
-                               ],
-                             ),
-                           );
-                         },
-                       ),
-                     ),
-                  ],
+          // 2. MAIN SCROLL VIEW
+          SafeArea(
+            bottom: false, // Allow content behind nav bar
+            child: CustomScrollView(
+              physics: const BouncingScrollPhysics(),
+              slivers: [
+                // A. Header
+                SliverToBoxAdapter(child: _buildHeader()),
+
+                // B. Search Bar
+                SliverToBoxAdapter(child: _buildSearchBar()),
+
+                // C. Quick Stats
+                SliverToBoxAdapter(child: _buildQuickStats()),
+
+                // D. Folders / Subjects
+                SliverToBoxAdapter(child: _buildSubjectChips()),
+
+                // E. Section Title
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                    child: const Text("Recent Lectures", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                  ),
                 ),
-              );
-            },
-          ),
 
-          const SizedBox(height: 10),
-          
-          const Padding(
-             padding: EdgeInsets.only(left: 20, top: 10),
-             child: Align(alignment: Alignment.centerLeft, child: Text("Recent Files", style: TextStyle(color: Colors.white70, fontSize: 14))),
-          ),
+                // F. Notes List
+                StreamBuilder<List<Map<String, dynamic>>>(
+                  stream: _notesStream,
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) {
+                      return const SliverToBoxAdapter(child: Center(child: CircularProgressIndicator(color: AppTheme.primaryBlue)));
+                    }
 
-          // 4. NOTES LIST (With Filtering Logic)
-          Expanded(
-            child: StreamBuilder<List<Map<String, dynamic>>>(
-              stream: _notesStream,
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-                
-                final allNotes = snapshot.data!;
-                
-                // --- FILTERING LOGIC ---
-                var visibleNotes = _selectedFolderId == -1 
-                    ? allNotes 
-                    : allNotes.where((n) => n['folder_id'] == _selectedFolderId).toList();
+                    var notes = snapshot.data!;
+                    // Apply Filters
+                    if (_selectedFolderId != -1) notes = notes.where((n) => n['folder_id'] == _selectedFolderId).toList();
+                    if (_searchQuery.isNotEmpty) notes = notes.where((n) => n['title'].toString().toLowerCase().contains(_searchQuery)).toList();
 
-                if (_searchQuery.isNotEmpty) {
-                  visibleNotes = visibleNotes.where((n) {
-                    final title = (n['title'] ?? '').toString().toLowerCase();
-                    return title.contains(_searchQuery);
-                  }).toList();
-                }
-                // -----------------------
+                    if (notes.isEmpty) return SliverToBoxAdapter(child: _buildEmptyState());
 
-                if (visibleNotes.isEmpty) {
-                   return const Center(child: Text("No notes found.", style: TextStyle(color: Colors.white70)));
-                }
-
-                return ListView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                  itemCount: visibleNotes.length,
-                  itemBuilder: (context, index) {
-                    final note = visibleNotes[index];
-                    final isDone = note['status'] == 'Done';
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: isDone ? Colors.green.shade50 : Colors.orange.shade50,
-                          child: Icon(isDone ? Icons.check : Icons.hourglass_empty, color: isDone ? Colors.green : Colors.orange),
-                        ),
-                        title: Text(note['title'] ?? 'Untitled', style: const TextStyle(fontWeight: FontWeight.bold)),
-                        subtitle: Text(isDone ? "Tap to review" : "AI Processing...", style: const TextStyle(fontSize: 12)),
-                        trailing: PopupMenuButton<String>(
-                          onSelected: (val) {
-                            if (val == 'rename') _renameNote(note['id'].toString(), note['title'] ?? '');
-                            if (val == 'move') _moveNote(note['id']);
-                          },
-                          itemBuilder: (context) => [
-                            const PopupMenuItem(value: 'rename', child: Row(children: [Icon(Icons.edit, color: Colors.blue), SizedBox(width: 10), Text("Rename")])),
-                            const PopupMenuItem(value: 'move', child: Row(children: [Icon(Icons.folder, color: Colors.orange), SizedBox(width: 10), Text("Move")])),
-                          ],
-                        ),
-                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => NoteDetailsPage(noteId: note['id'], title: note['title'] ?? 'Lecture'))),
+                    return SliverList(
+                      delegate: SliverChildBuilderDelegate(
+                        (context, index) => _buildLectureCard(notes[index]),
+                        childCount: notes.length,
                       ),
                     );
                   },
-                );
+                ),
+
+                // Spacer for Bottom Nav
+                const SliverPadding(padding: EdgeInsets.only(bottom: 120)),
+              ],
+            ),
+          ),
+
+          // 3. FLOATING ACTION BUTTON (Mic)
+          Positioned(
+            bottom: 100, right: 24,
+            child: GestureDetector(
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RecordPage())),
+              child: Container(
+                width: 64, height: 64,
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryBlue,
+                  shape: BoxShape.circle,
+                  boxShadow: [BoxShadow(color: AppTheme.primaryBlue.withOpacity(0.6), blurRadius: 20, spreadRadius: 0)],
+                  border: Border.all(color: Colors.white.withOpacity(0.2), width: 2),
+                ),
+                child: const Icon(Icons.mic, color: Colors.white, size: 32),
+              ),
+            ),
+          ),
+
+          // 4. GLASS BOTTOM NAVIGATION
+          Positioned(
+            bottom: 0, left: 0, right: 0,
+            child: _buildGlassBottomNav(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- HELPER WIDGETS ---
+
+ Widget _buildOrb(double size, Color color) {
+    return ImageFiltered( 
+      imageFilter: ImageFilter.blur(sigmaX: 80, sigmaY: 80),
+      child: Container(
+        width: size, 
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: RadialGradient(
+            colors: [color, color.withOpacity(0)],
+            stops: const [0.1, 0.6], 
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 24, 24, 10),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: [
+              // Profile Placeholder
+              Stack(
+                children: [
+                  Container(
+                    width: 48, height: 48,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(color: Colors.white.withOpacity(0.2), width: 2),
+                    ),
+                    child: const Icon(Icons.person, color: Colors.white),
+                  ),
+                  Positioned(
+                    bottom: 0, right: 0,
+                    child: Container(
+                      width: 12, height: 12,
+                      decoration: BoxDecoration(
+                        color: Colors.greenAccent,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: AppTheme.backgroundDark, width: 2),
+                      ),
+                    ),
+                  )
+                ],
+              ),
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text("LUMEN AI", style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                  const Text("Welcome back", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ],
+          ),
+          IconButton(
+             onPressed: _pickAndUploadFile, // Quick Upload Access
+             icon: const Icon(Icons.cloud_upload_outlined, color: Colors.white),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSearchBar() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      height: 56,
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withOpacity(0.1)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.search, color: Colors.white.withOpacity(0.5)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: TextField(
+              style: const TextStyle(color: Colors.white),
+              onChanged: (val) => setState(() => _searchQuery = val.toLowerCase()),
+              decoration: InputDecoration(
+                hintText: "Search knowledge base...",
+                hintStyle: TextStyle(color: Colors.white.withOpacity(0.4)),
+                border: InputBorder.none,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQuickStats() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+      child: Row(
+        children: [
+          Expanded(child: _buildStatCard("Study Streak", "5", "days", Icons.local_fire_department, Colors.orangeAccent)),
+          const SizedBox(width: 16),
+          Expanded(
+            child: StreamBuilder<List<Map<String, dynamic>>>(
+              stream: _tasksStream,
+              builder: (context, snapshot) {
+                final count = snapshot.data?.where((t) => t['is_completed'] == false).length ?? 0;
+                return _buildStatCard("Tasks Due", count.toString(), "pending", Icons.assignment_turned_in, Colors.purpleAccent);
               },
             ),
           ),
@@ -402,20 +319,215 @@ class _DashboardViewState extends State<DashboardView> {
     );
   }
 
-  Widget _buildFolderChip(String label, int id) {
-    final isSelected = _selectedFolderId == id;
-    return Padding(
-      padding: const EdgeInsets.only(right: 8.0),
-      child: ChoiceChip(
-        label: Text(label),
-        selected: isSelected,
-        onSelected: (selected) {
-          if (selected) setState(() => _selectedFolderId = id);
+  Widget _buildStatCard(String label, String value, String unit, IconData icon, Color iconColor) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withOpacity(0.1)),
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            right: -5, top: -5,
+            child: Icon(icon, color: iconColor.withOpacity(0.2), size: 40),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 12)),
+              const SizedBox(height: 4),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
+                children: [
+                  Text(value, style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+                  const SizedBox(width: 4),
+                  Text(unit, style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 12)),
+                ],
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSubjectChips() {
+    return SizedBox(
+      height: 60,
+      child: StreamBuilder<List<Map<String, dynamic>>>(
+        stream: _foldersStream,
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) return const SizedBox();
+          final folders = snapshot.data!;
+          return ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            children: [
+              _buildChip("All", -1),
+              ...folders.map((f) => _buildChip(f['name'], f['id'])),
+              Padding(
+                padding: const EdgeInsets.only(left: 8),
+                child: IconButton(
+                  onPressed: _createFolderDialog,
+                  icon: const Icon(Icons.add_circle, color: AppTheme.primaryBlue),
+                ),
+              )
+            ],
+          );
         },
-        selectedColor: Colors.white,
-        backgroundColor: Colors.white.withOpacity(0.2),
-        labelStyle: TextStyle(color: isSelected ? AppTheme.deepBlue : Colors.white, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: BorderSide(color: isSelected ? Colors.white : Colors.transparent)),
+      ),
+    );
+  }
+
+  Widget _buildChip(String label, int id) {
+    final isSelected = _selectedFolderId == id;
+    return GestureDetector(
+      onTap: () => setState(() => _selectedFolderId = id),
+      child: Container(
+        margin: const EdgeInsets.only(right: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        decoration: BoxDecoration(
+          color: isSelected ? AppTheme.primaryBlue : Colors.white.withOpacity(0.05),
+          borderRadius: BorderRadius.circular(30),
+          border: Border.all(color: isSelected ? AppTheme.primaryBlue : Colors.white.withOpacity(0.1)),
+          boxShadow: isSelected ? [BoxShadow(color: AppTheme.primaryBlue.withOpacity(0.4), blurRadius: 15)] : [],
+        ),
+        child: Text(label, style: TextStyle(color: isSelected ? Colors.white : Colors.white.withOpacity(0.8), fontWeight: FontWeight.w600, fontSize: 14)),
+      ),
+    );
+  }
+
+  Widget _buildLectureCard(Map<String, dynamic> note) {
+    final isDone = note['status'] == 'Done';
+    // Gradients for variety
+    final gradients = [
+      [Colors.purpleAccent, Colors.deepPurple],
+      [Colors.orangeAccent, Colors.redAccent],
+      [Colors.tealAccent, Colors.teal],
+    ];
+    final grad = gradients[note['id'] % gradients.length];
+
+    return GestureDetector(
+      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => NoteDetailsPage(noteId: note['id'], title: note['title']))),
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.05),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.white.withOpacity(0.1)),
+        ),
+        child: Row(
+          children: [
+            // Icon Container
+            Container(
+              width: 56, height: 56,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(colors: [grad[0], grad[1]], begin: Alignment.topLeft, end: Alignment.bottomRight),
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [BoxShadow(color: grad[0].withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4))],
+              ),
+              child: const Icon(Icons.science, color: Colors.white, size: 28),
+            ),
+            const SizedBox(width: 16),
+            // Info
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(note['title'] ?? 'Untitled', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Icon(Icons.schedule, color: Colors.white.withOpacity(0.5), size: 14),
+                      const SizedBox(width: 4),
+                      Text(isDone ? "Ready" : "Processing...", style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12)),
+                    ],
+                  )
+                ],
+              ),
+            ),
+            // Status Tag
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: isDone ? Colors.green.withOpacity(0.2) : Colors.orange.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: isDone ? Colors.green.withOpacity(0.3) : Colors.orange.withOpacity(0.3)),
+                  ),
+                  child: Text(
+                    isDone ? "DONE" : "WAIT",
+                    style: TextStyle(color: isDone ? Colors.greenAccent : Colors.orangeAccent, fontSize: 10, fontWeight: FontWeight.bold)
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Icon(Icons.chevron_right, color: Colors.white.withOpacity(0.3)),
+              ],
+            )
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGlassBottomNav() {
+    return ClipRRect(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: Container(
+          height: 80,
+          decoration: BoxDecoration(
+            color: const Color(0xFF0F172A).withOpacity(0.8),
+            border: Border(top: BorderSide(color: Colors.white.withOpacity(0.1))),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _navItem(Icons.home_filled, "Home", true),
+              _navItem(Icons.library_books_outlined, "Library", false),
+              const SizedBox(width: 40), // Space for FAB
+              _navItem(Icons.insights, "Insights", false),
+              _navItem(Icons.person_outline, "Profile", false),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _navItem(IconData icon, String label, bool isActive) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: isActive ? Colors.white.withOpacity(0.1) : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(icon, color: isActive ? AppTheme.primaryBlue : Colors.white.withOpacity(0.5)),
+        ),
+        const SizedBox(height: 4),
+        Text(label, style: TextStyle(color: isActive ? Colors.white : Colors.white.withOpacity(0.5), fontSize: 10, fontWeight: FontWeight.w500)),
+      ],
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        children: [
+          const SizedBox(height: 40),
+          Icon(Icons.description_outlined, size: 60, color: Colors.white.withOpacity(0.1)),
+          const SizedBox(height: 10),
+          Text("No notes found", style: TextStyle(color: Colors.white.withOpacity(0.3))),
+        ],
       ),
     );
   }
