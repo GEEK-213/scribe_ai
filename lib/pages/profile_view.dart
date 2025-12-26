@@ -1,6 +1,8 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'login_page.dart';
+import '../theme/app_theme.dart';
 
 class ProfileView extends StatefulWidget {
   const ProfileView({super.key});
@@ -10,35 +12,115 @@ class ProfileView extends StatefulWidget {
 }
 
 class _ProfileViewState extends State<ProfileView> {
+  // 1. DATA VARIABLES
   final _user = Supabase.instance.client.auth.currentUser;
+  int _notesCount = 0;
+  int _tasksCompleted = 0;
+  bool _isLoading = true;
+
+  // Local list for interests (Interactive UI)
+  final List<String> _interests = ["Machine Learning", "Flutter", "Cyber Security"];
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchProfileStats();
+  }
+
+  // 2. FETCH REAL STATS FROM DB
+  Future<void> _fetchProfileStats() async {
+    if (_user == null) return;
+
+    try {
+      // Count Notes
+      final notesResponse = await Supabase.instance.client
+          .from('notes')
+          .select('id')
+          .eq('user_id', _user!.id);
+      
+      // Count Completed Tasks
+      final tasksResponse = await Supabase.instance.client
+          .from('study_tasks')
+          .select('id')
+          .eq('user_id', _user!.id)
+          .eq('is_completed', true);
+
+      if (mounted) {
+        setState(() {
+          _notesCount = notesResponse.length;
+          _tasksCompleted = tasksResponse.length;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error fetching stats: $e");
+    }
+  }
+
+  // 3. LOGOUT LOGIC
+  Future<void> _handleLogout() async {
+    await Supabase.instance.client.auth.signOut();
+    if (mounted) {
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (context) => const LoginPage()),
+        (route) => false,
+      );
+    }
+  }
+
+  // 4. ADD INTEREST LOGIC (UI Only)
+  void _addInterest() {
+    TextEditingController controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E293B),
+        title: const Text("Add Interest", style: TextStyle(color: Colors.white)),
+        content: TextField(
+          controller: controller,
+          style: const TextStyle(color: Colors.white),
+          decoration: const InputDecoration(
+            hintText: "e.g. Python",
+            hintStyle: TextStyle(color: Colors.white54),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+          TextButton(
+            onPressed: () {
+              if (controller.text.isNotEmpty) {
+                setState(() => _interests.add(controller.text));
+                Navigator.pop(context);
+              }
+            },
+            child: const Text("Add", style: TextStyle(color: AppTheme.primaryBlue)),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF020617), // HTML 'bg-[#020617]'
-      body: Stack(
+    // We use a Container instead of Scaffold because this page sits INSIDE HomePage
+    return Container(
+      color: const Color(0xFF020617), // Dark Background
+      child: Stack(
         children: [
-          // 1. BACKGROUND ORBS (Matched to HTML positions)
-          Positioned(
-            top: -100, left: -100,
-            child: _buildOrb(500, Colors.blue.shade900.withOpacity(0.3)),
-          ),
-          Positioned(
-            bottom: -100, right: -100,
-            child: _buildOrb(500, Colors.indigo.shade900.withOpacity(0.3)),
-          ),
-          Positioned(
-            top: 100, right: -50,
-            child: _buildOrb(300, Colors.cyan.withOpacity(0.15)),
-          ),
+          // 1. BACKGROUND ORBS
+          Positioned(top: -100, left: -100, child: _buildOrb(500, Colors.blue.shade900.withOpacity(0.3))),
+          Positioned(bottom: -100, right: -100, child: _buildOrb(500, Colors.indigo.shade900.withOpacity(0.3))),
+          Positioned(top: 100, right: -50, child: _buildOrb(300, Colors.cyan.withOpacity(0.15))),
 
-          // 2. MAIN CONTENT SCROLL
-          Positioned.fill(
+          // 2. MAIN SCROLLABLE CONTENT
+          SafeArea(
             child: SingleChildScrollView(
               physics: const BouncingScrollPhysics(),
-              padding: const EdgeInsets.only(top: 80, bottom: 120), // Space for nav bars
+              padding: const EdgeInsets.symmetric(vertical: 20),
               child: Column(
                 children: [
+                  const SizedBox(height: 20),
                   _buildProfileHeader(),
                   const SizedBox(height: 24),
                   _buildStatsSection(),
@@ -49,22 +131,11 @@ class _ProfileViewState extends State<ProfileView> {
                   const SizedBox(height: 40),
                   _buildLogoutButton(),
                   const SizedBox(height: 20),
-                  Text("Lumen AI v2.4.0 (Build 492)", style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 12, fontFamily: 'monospace')),
+                  Text("Lumen AI v1.0.0", style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 12, fontFamily: 'monospace')),
+                  const SizedBox(height: 100), // Space for Bottom Nav
                 ],
               ),
             ),
-          ),
-
-          // 3. TOP GLASS NAVBAR (Sticky)
-          Positioned(
-            top: 0, left: 0, right: 0,
-            child: _buildTopNavBar(context),
-          ),
-
-          // 4. BOTTOM GLASS NAVBAR
-          Positioned(
-            bottom: 0, left: 0, right: 0,
-            child: _buildBottomNav(),
           ),
         ],
       ),
@@ -72,29 +143,6 @@ class _ProfileViewState extends State<ProfileView> {
   }
 
   // --- WIDGET SECTIONS ---
-
-  Widget _buildTopNavBar(BuildContext context) {
-    return ClipRRect(
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(20, 50, 20, 15), // Adjust for SafeArea
-          decoration: BoxDecoration(
-            color: const Color(0xFF050A1E).withOpacity(0.8),
-            border: Border(bottom: BorderSide(color: Colors.white.withOpacity(0.1))),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              _glassIconButton(Icons.arrow_back, () => Navigator.pop(context)),
-              const Text("Profile", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-              _glassIconButton(Icons.more_horiz, () {}),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 
   Widget _buildProfileHeader() {
     return Padding(
@@ -115,66 +163,30 @@ class _ProfileViewState extends State<ProfileView> {
             ),
             child: Column(
               children: [
-                // Avatar with Glow
-                Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    Container(
-                      width: 120, height: 120,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: const LinearGradient(colors: [Colors.cyanAccent, Colors.blue, Colors.purple]),
-                        boxShadow: [BoxShadow(color: Colors.blue.withOpacity(0.5), blurRadius: 30)],
-                      ),
-                    ),
-                    Container(
-                      width: 110, height: 110,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white.withOpacity(0.2), width: 3),
-                        color: Colors.black,
-                        image: const DecorationImage(image: NetworkImage("https://i.pravatar.cc/300?img=11"), fit: BoxFit.cover),
-                      ),
-                    ),
-                    Positioned(
-                      bottom: 0, right: 0,
-                      child: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(color: Colors.blueAccent, shape: BoxShape.circle, border: Border.all(color: Colors.white24)),
-                        child: const Icon(Icons.camera_alt, color: Colors.white, size: 16),
-                      ),
-                    )
-                  ],
+                // Avatar
+                Container(
+                  width: 100, height: 100,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: const LinearGradient(colors: [Colors.cyanAccent, Colors.blue, Colors.purple]),
+                    boxShadow: [BoxShadow(color: Colors.blue.withOpacity(0.5), blurRadius: 30)],
+                    border: Border.all(color: Colors.white, width: 2),
+                  ),
+                  child: const Icon(Icons.person, size: 50, color: Colors.white),
                 ),
                 const SizedBox(height: 16),
                 
-                // Name & Role
-                const Text("Alex Carter", style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+                // Real Email
+                Text(
+                  _user?.email ?? "Guest User",
+                  style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                ),
                 const SizedBox(height: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(color: Colors.blue.withOpacity(0.1), borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.blue.withOpacity(0.2))),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text("Student", style: TextStyle(color: Colors.blue.shade200, fontSize: 12, fontWeight: FontWeight.w600)),
-                      const SizedBox(width: 8),
-                      Container(width: 4, height: 4, decoration: const BoxDecoration(color: Colors.white54, shape: BoxShape.circle)),
-                      const SizedBox(width: 8),
-                      Text("Computer Science", style: TextStyle(color: Colors.blue.shade200.withOpacity(0.7), fontSize: 12)),
-                    ],
-                  ),
+                  child: Text("BCA Student", style: TextStyle(color: Colors.blue.shade200, fontSize: 12, fontWeight: FontWeight.w600)),
                 ),
-                const SizedBox(height: 24),
-
-                // Action Buttons
-                Row(
-                  children: [
-                    Expanded(child: _actionButton("Edit Profile", Icons.edit)),
-                    const SizedBox(width: 12),
-                    Expanded(child: _actionButton("Share", Icons.share)),
-                  ],
-                )
               ],
             ),
           ),
@@ -192,119 +204,48 @@ class _ProfileViewState extends State<ProfileView> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text("Overview", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-              Text("View All", style: TextStyle(color: Colors.blue.shade300, fontSize: 12, fontWeight: FontWeight.bold)),
+              if (_isLoading) const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white30))
             ],
           ),
           const SizedBox(height: 16),
           Row(
             children: [
-              Expanded(child: _statCard("12", "Day Streak", Icons.local_fire_department, Colors.orange, "+2")),
+              Expanded(child: _statCard("$_tasksCompleted", "Tasks Done", Icons.check_circle_outline, Colors.orange, "Active")),
               const SizedBox(width: 12),
-              Expanded(child: _statCard("145", "Notes Scribed", Icons.auto_stories, const Color(0xFF10B981), "+15%")),
+              Expanded(child: _statCard("$_notesCount", "Notes Scribed", Icons.auto_stories, const Color(0xFF10B981), "Total")),
             ],
           ),
-          const SizedBox(height: 12),
-          _longStatCard(),
         ],
       ),
     );
   }
 
   Widget _statCard(String value, String label, IconData icon, Color color, String badge) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: const Color(0xFF111928).withOpacity(0.6), // Glass Card
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.white.withOpacity(0.08)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: color.withOpacity(0.2), borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: color.withOpacity(0.2))
-                    ),
-                    child: Icon(icon, color: color, size: 20),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(color: Colors.green.withOpacity(0.1), borderRadius: BorderRadius.circular(6), border: Border.all(color: Colors.green.withOpacity(0.2))),
-                    child: Text(badge, style: const TextStyle(color: Colors.greenAccent, fontSize: 10, fontWeight: FontWeight.bold)),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Text(value, style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
-              Text(label, style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12)),
-            ],
-          ),
-        ),
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111928).withOpacity(0.6), // Glass Card
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
       ),
-    );
-  }
-
-  Widget _longStatCard() {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: const Color(0xFF111928).withOpacity(0.6),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.white.withOpacity(0.08)),
-          ),
-          child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.purple.withOpacity(0.2), borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.purple.withOpacity(0.2))
-                    ),
-                    child: const Icon(Icons.smart_toy, color: Colors.purpleAccent, size: 24),
-                  ),
-                  const SizedBox(width: 16),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text("3,240", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                      Text("AI Generations", style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12)),
-                    ],
-                  ),
-                ],
+              Icon(icon, color: color, size: 24),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+                child: Text(badge, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)),
               ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  const Text("Level 8", style: TextStyle(color: Colors.blueAccent, fontSize: 12, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 4),
-                  SizedBox(
-                    width: 80, height: 6,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(10),
-                      child: const LinearProgressIndicator(value: 0.7, backgroundColor: Colors.white10, valueColor: AlwaysStoppedAnimation(Colors.blueAccent)),
-                    ),
-                  )
-                ],
-              )
             ],
           ),
-        ),
+          const SizedBox(height: 16),
+          Text(value, style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+          Text(label, style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12)),
+        ],
       ),
     );
   }
@@ -320,11 +261,18 @@ class _ProfileViewState extends State<ProfileView> {
           Wrap(
             spacing: 8, runSpacing: 8,
             children: [
-              _interestChip("Machine Learning"),
-              _interestChip("Data Structures"),
-              _interestChip("UX Design"),
-              _interestChip("Python"),
-              _addInterestButton(),
+              ..._interests.map((i) => _interestChip(i)),
+              GestureDetector(
+                onTap: _addInterest,
+                child: Container(
+                  width: 32, height: 32,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.white.withOpacity(0.3)),
+                  ),
+                  child: Icon(Icons.add, color: Colors.white.withOpacity(0.5), size: 16),
+                ),
+              ),
             ],
           ),
         ],
@@ -344,17 +292,6 @@ class _ProfileViewState extends State<ProfileView> {
     );
   }
 
-  Widget _addInterestButton() {
-    return Container(
-      width: 32, height: 32,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.white.withOpacity(0.3), style: BorderStyle.solid),
-      ),
-      child: Icon(Icons.add, color: Colors.white.withOpacity(0.5), size: 16),
-    );
-  }
-
   Widget _buildSettingsSection() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -368,62 +305,38 @@ class _ProfileViewState extends State<ProfileView> {
             _settingsTile("Notifications", Icons.notifications, Colors.indigo, badge: "2"),
             _settingsTile("AI Preferences", Icons.tune, Colors.cyan),
           ]),
-          const SizedBox(height: 16),
-          _settingsGroup([
-            _settingsTile("Privacy & Security", Icons.lock, Colors.white60),
-            _settingsTile("Help & Support", Icons.help, Colors.white60),
-          ]),
         ],
       ),
     );
   }
 
   Widget _settingsGroup(List<Widget> children) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-        child: Container(
-          decoration: BoxDecoration(
-            color: const Color(0xFF111928).withOpacity(0.6),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.white.withOpacity(0.08)),
-          ),
-          child: Column(children: children),
-        ),
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF111928).withOpacity(0.6),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
       ),
+      child: Column(children: children),
     );
   }
 
   Widget _settingsTile(String title, IconData icon, Color color, {String? badge}) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: () {},
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(8), border: Border.all(color: color.withOpacity(0.1))),
-                child: Icon(icon, color: color == Colors.white60 ? Colors.white70 : color, size: 18),
-              ),
-              const SizedBox(width: 16),
-              Expanded(child: Text(title, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500))),
-              if (badge != null) ...[
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(4), boxShadow: [BoxShadow(color: Colors.red.withOpacity(0.5), blurRadius: 4)]),
-                  child: Text(badge, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-                ),
-                const SizedBox(width: 8),
-              ],
-              Icon(Icons.chevron_right, color: Colors.white.withOpacity(0.3), size: 20),
-            ],
-          ),
-        ),
+    return ListTile(
+      leading: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+        child: Icon(icon, color: color, size: 18),
       ),
+      title: Text(title, style: const TextStyle(color: Colors.white, fontSize: 14)),
+      trailing: badge != null 
+          ? Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(4)),
+              child: Text(badge, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+            ) 
+          : Icon(Icons.chevron_right, color: Colors.white.withOpacity(0.3), size: 20),
+      onTap: () {},
     );
   }
 
@@ -431,16 +344,12 @@ class _ProfileViewState extends State<ProfileView> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: ElevatedButton(
-        onPressed: () async {
-          await Supabase.instance.client.auth.signOut();
-          if (mounted) Navigator.pushReplacementNamed(context, '/login'); // Adjust route
-        },
+        onPressed: _handleLogout,
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.red.withOpacity(0.1),
           foregroundColor: Colors.redAccent,
           padding: const EdgeInsets.symmetric(vertical: 16),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: Colors.red.withOpacity(0.2))),
-          elevation: 0,
         ),
         child: const Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -454,39 +363,6 @@ class _ProfileViewState extends State<ProfileView> {
     );
   }
 
-  // --- HELPERS ---
-
-  Widget _glassIconButton(IconData icon, VoidCallback onTap) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(50),
-      child: Container(
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), shape: BoxShape.circle, border: Border.all(color: Colors.white.withOpacity(0.1))),
-        child: Icon(icon, color: Colors.white, size: 20),
-      ),
-    );
-  }
-
-  Widget _actionButton(String label, IconData icon) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withOpacity(0.1)),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, color: Colors.blue.shade300, size: 16),
-          const SizedBox(width: 8),
-          Text(label, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
-        ],
-      ),
-    );
-  }
-
   Widget _buildOrb(double size, Color color) {
     return ImageFiltered(
       imageFilter: ImageFilter.blur(sigmaX: 100, sigmaY: 100),
@@ -494,45 +370,6 @@ class _ProfileViewState extends State<ProfileView> {
         width: size, height: size,
         decoration: BoxDecoration(shape: BoxShape.circle, color: color),
       ),
-    );
-  }
-
- Widget _buildBottomNav() {
-    return ClipRRect(
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-        child: Container(
-          height: 85,
-          padding: const EdgeInsets.only(bottom: 10),
-          decoration: BoxDecoration(
-            color: const Color(0xFF050A1E).withOpacity(0.8),
-            border: Border(top: BorderSide(color: Colors.white.withOpacity(0.1))),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [ // Correct property is 'children'
-              _navItem(Icons.home_outlined, false),
-              _navItem(Icons.folder_open, false),
-              const SizedBox(width: 40), // Gap for FAB
-              _navItem(Icons.school_outlined, false),
-              _navItem(Icons.person, true),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-  
-  // Custom FAB Logic handled in Dashboard, this is visual only for Profile
-  List<Widget> get items => []; // Placeholder
-
-  Widget _navItem(IconData icon, bool isActive) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Icon(icon, color: isActive ? Colors.blueAccent : Colors.white54, size: 26),
-        if (isActive) Container(margin: const EdgeInsets.only(top: 4), width: 4, height: 4, decoration: const BoxDecoration(color: Colors.blueAccent, shape: BoxShape.circle))
-      ],
     );
   }
 }
