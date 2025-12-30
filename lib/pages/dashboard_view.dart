@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:file_picker/file_picker.dart';
 import '../theme/app_theme.dart';
 import 'record_page.dart';
+import 'glossary_view.dart';
 import 'note_details_page.dart';
 
 class DashboardView extends StatefulWidget {
@@ -252,9 +253,20 @@ class _DashboardViewState extends State<DashboardView> {
               ),
             ],
           ),
-          IconButton(
-             onPressed: _pickAndUploadFile, 
-             icon: const Icon(Icons.cloud_upload_outlined, color: Colors.white),
+          Row(
+            children: [
+              // 1. Glossary Button (New!)
+              IconButton(
+                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const GlossaryView())),
+                icon: const Icon(Icons.menu_book_rounded, color: Colors.white),
+                tooltip: "Global Glossary",
+              ),
+              // 2. Upload Button
+              IconButton(
+                onPressed: _pickAndUploadFile, 
+                icon: const Icon(Icons.cloud_upload_outlined, color: Colors.white),
+              ),
+            ],
           ),
         ],
       ),
@@ -403,8 +415,7 @@ class _DashboardViewState extends State<DashboardView> {
     final grad = gradients[note['id'] % gradients.length];
 
     return GestureDetector(
-      // --- THE FIX IS HERE ---
-      // We now pass the FULL 'note' object, not just 'noteId'
+     
       onTap: () => Navigator.push(
         context, 
         MaterialPageRoute(builder: (_) => NoteDetailsPage(note: note))
