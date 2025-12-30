@@ -5,19 +5,19 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flip_card/flip_card.dart';
+import 'package:graphview/GraphView.dart'; // Ensure you have: flutter pub add graphview
 
 import '../theme/app_theme.dart';
 import 'chat_screen.dart';
 import 'quiz_view.dart';
 
 class NoteDetailsPage extends StatefulWidget {
-  final int noteId;
-  final String title;
+  // FIXED: Now accepts the full note object to match NotesView
+  final Map<String, dynamic> note;
 
   const NoteDetailsPage({
     super.key,
-    required this.noteId,
-    required this.title,
+    required this.note,
   });
 
   @override
@@ -36,7 +36,8 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> with SingleTickerProv
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    // NOW 5 TABS: Summary, Transcript, Quiz, Cards, Mind Map
+    _tabController = TabController(length: 5, vsync: this);
 
     _audioPlayer.onPlayerStateChanged.listen((state) {
       if (mounted) setState(() => _isPlaying = state == PlayerState.playing);
@@ -55,7 +56,10 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> with SingleTickerProv
 
   // ================= AUDIO =================
 
-  Future<void> _playAudio(String path) async {
+  Future<void> _playAudio() async {
+    final path = widget.note['audio_path'];
+    if (path == null) return;
+
     try {
       final url = Supabase.instance.client.storage.from('Lectures').getPublicUrl(path);
       await _audioPlayer.play(UrlSource(url));
@@ -87,7 +91,7 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> with SingleTickerProv
     );
 
     if (confirm == true) {
-      await Supabase.instance.client.from('notes').delete().eq('id', widget.noteId);
+      await Supabase.instance.client.from('notes').delete().eq('id', widget.note['id']);
       if (mounted) Navigator.pop(context);
     }
   }
@@ -96,10 +100,12 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> with SingleTickerProv
 
   @override
   Widget build(BuildContext context) {
-    final noteStream = Supabase.instance.client
-        .from('notes')
-        .stream(primaryKey: ['id'])
-        .eq('id', widget.noteId);
+    // Process Transcript to make Speakers Bold & Blue
+    String transcript = (widget.note['transcript'] ?? "Generating transcript...")
+        .replaceAllMapped(
+            RegExp(r'(Speaker [A-Z0-9]+:)'), 
+            (match) => "\n\n**${match.group(0)}** "
+        );
 
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A), // Lumen Dark Background
@@ -107,76 +113,71 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> with SingleTickerProv
       appBar: _buildGlassAppBar(),
       body: Stack(
         children: [
-          // 1. AMBIENT GLOW (Lumen Style)
+          // 1. AMBIENT GLOW
           Positioned(
             top: -100, right: -100,
-            child: _buildOrb(400, const Color(0xFF2B8CEE).withOpacity(0.15)), // Blue Glow
+            child: _buildOrb(400, const Color(0xFF2B8CEE).withOpacity(0.15)),
           ),
           Positioned(
             bottom: -50, left: -50,
-            child: _buildOrb(300, const Color(0xFF8B5CF6).withOpacity(0.1)), // Purple Glow
+            child: _buildOrb(300, const Color(0xFF8B5CF6).withOpacity(0.1)),
           ),
 
           // 2. MAIN CONTENT
           SafeArea(
             bottom: false,
-            child: StreamBuilder(
-              stream: noteStream,
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) return const Center(child: CircularProgressIndicator(color: AppTheme.primaryBlue));
-                if (snapshot.data!.isEmpty) return const Center(child: Text("Note not found", style: TextStyle(color: Colors.white)));
+            child: Column(
+              children: [
+                // ===== TOP FIXED SECTION =====
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Column(
+                    children: [
+                      if (widget.note['audio_path'] != null)
+                        _GlassAudioPlayer(
+                          isPlaying: _isPlaying,
+                          position: _position,
+                          duration: _duration,
+                          onPlayPause: () => _isPlaying ? _audioPlayer.pause() : _playAudio(),
+                          onSeek: (v) => _audioPlayer.seek(Duration(seconds: v.toInt())),
+                        ),
+                      const SizedBox(height: 20),
+                      _GlassTabSelector(controller: _tabController),
+                      const SizedBox(height: 20),
+                    ],
+                  ),
+                ),
 
-                final note = snapshot.data![0];
-                final audioPath = note['audio_path'];
-
-                return Column(
-                  children: [
-                    // ===== TOP FIXED SECTION =====
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Column(
-                        children: [
-                          if (audioPath != null)
-                            _GlassAudioPlayer(
-                              isPlaying: _isPlaying,
-                              position: _position,
-                              duration: _duration,
-                              onPlayPause: () => _isPlaying ? _audioPlayer.pause() : _playAudio(audioPath),
-                              onSeek: (v) => _audioPlayer.seek(Duration(seconds: v.toInt())),
-                            ),
-                          const SizedBox(height: 20),
-                          _GlassTabSelector(controller: _tabController),
-                          const SizedBox(height: 20),
-                        ],
+                // ===== SCROLLABLE CONTENT =====
+                Expanded(
+                  child: TabBarView(
+                    controller: _tabController,
+                    physics: const BouncingScrollPhysics(),
+                    children: [
+                      // 1. Summary
+                      _GlassMarkdownCard(text: widget.note['summary'] ?? "Generating summary..."),
+                      
+                      // 2. Transcript
+                      _GlassMarkdownCard(text: transcript),
+                      
+                      // 3. Quiz
+                      widget.note['quiz'] != null && (widget.note['quiz'] as List).isNotEmpty
+                          ? QuizView(questions: widget.note['quiz']) 
+                          : const Center(child: Text("No Quiz Available", style: TextStyle(color: Colors.white54))),
+                      
+                      // 4. Flashcards
+                      _GlassFlashcardsDeck(
+                        noteId: widget.note['id'],
+                        currentIndex: _currentCardIndex,
+                        onIndexChanged: (i) => setState(() => _currentCardIndex = i),
                       ),
-                    ),
 
-                    // ===== SCROLLABLE CONTENT =====
-                    Expanded(
-                      child: TabBarView(
-                        controller: _tabController,
-                        physics: const BouncingScrollPhysics(),
-                        children: [
-                          // 1. Summary
-                          _GlassMarkdownCard(text: note['summary'] ?? "Generating summary..."),
-                          // 2. Transcript
-                          _GlassMarkdownCard(text: note['transcript'] ?? "Generating transcript..."),
-                          // 3. Quiz
-                          note['quiz'] != null 
-                              ? QuizView(questions: note['quiz']) 
-                              : const Center(child: CircularProgressIndicator(color: AppTheme.primaryBlue)),
-                          // 4. Flashcards
-                          _GlassFlashcardsDeck(
-                            noteId: widget.noteId,
-                            currentIndex: _currentCardIndex,
-                            onIndexChanged: (i) => setState(() => _currentCardIndex = i),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                );
-              },
+                      // 5. MIND MAP (New!)
+                      _MindMapViewer(mindMapData: widget.note['mind_map']),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -202,13 +203,15 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> with SingleTickerProv
         onPressed: () => Navigator.pop(context),
       ),
       title: Text(
-        widget.title,
+        widget.note['title'] ?? 'Note',
         style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
       ),
       actions: [
         IconButton(
           icon: const Icon(Icons.chat_bubble_outline, color: AppTheme.primaryBlue),
-          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ChatScreen(noteId: widget.noteId, noteTitle: widget.title))),
+          onPressed: () => Navigator.push(context, MaterialPageRoute(
+            builder: (_) => ChatScreen(noteId: widget.note['id'], noteTitle: widget.note['title'] ?? 'Chat')
+          )),
         ),
         IconButton(
           icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
@@ -232,7 +235,6 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> with SingleTickerProv
 /* ============================================================
    GLASS AUDIO PLAYER
 ============================================================ */
-
 class _GlassAudioPlayer extends StatelessWidget {
   final bool isPlaying;
   final Duration position;
@@ -263,7 +265,6 @@ class _GlassAudioPlayer extends StatelessWidget {
           ),
           child: Row(
             children: [
-              // Play Button
               GestureDetector(
                 onTap: onPlayPause,
                 child: Container(
@@ -277,7 +278,6 @@ class _GlassAudioPlayer extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 16),
-              // Slider & Time
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -312,10 +312,8 @@ class _GlassAudioPlayer extends StatelessWidget {
 /* ============================================================
    GLASS TAB SELECTOR
 ============================================================ */
-
 class _GlassTabSelector extends StatelessWidget {
   final TabController controller;
-
   const _GlassTabSelector({required this.controller});
 
   @override
@@ -337,11 +335,13 @@ class _GlassTabSelector extends StatelessWidget {
         labelColor: Colors.white,
         unselectedLabelColor: Colors.white38,
         overlayColor: MaterialStateProperty.all(Colors.transparent),
+        isScrollable: true,
         tabs: const [
           Tab(text: "Summary"),
           Tab(text: "Text"),
           Tab(text: "Quiz"),
           Tab(text: "Cards"),
+          Tab(text: "Mind Map"), // Added!
         ],
       ),
     );
@@ -349,12 +349,10 @@ class _GlassTabSelector extends StatelessWidget {
 }
 
 /* ============================================================
-   GLASS MARKDOWN CARD (Content)
+   GLASS MARKDOWN CARD
 ============================================================ */
-
 class _GlassMarkdownCard extends StatelessWidget {
   final String text;
-
   const _GlassMarkdownCard({required this.text});
 
   @override
@@ -382,9 +380,7 @@ class _GlassMarkdownCard extends StatelessWidget {
                 h2: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
                 h3: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
                 listBullet: const TextStyle(color: AppTheme.primaryBlue, fontSize: 16),
-                strong: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                code: TextStyle(backgroundColor: Colors.black.withOpacity(0.3), color: Colors.greenAccent, fontFamily: 'monospace'),
-                codeblockDecoration: BoxDecoration(color: Colors.black.withOpacity(0.3), borderRadius: BorderRadius.circular(8)),
+                strong: const TextStyle(color: AppTheme.primaryBlue, fontWeight: FontWeight.bold),
               ),
             ),
           ),
@@ -395,9 +391,8 @@ class _GlassMarkdownCard extends StatelessWidget {
 }
 
 /* ============================================================
-   NEON FLASHCARDS
+   GLASS FLASHCARDS DECK
 ============================================================ */
-
 class _GlassFlashcardsDeck extends StatelessWidget {
   final int noteId;
   final int currentIndex;
@@ -426,7 +421,7 @@ class _GlassFlashcardsDeck extends StatelessWidget {
               children: [
                 Icon(Icons.style, size: 60, color: Colors.white.withOpacity(0.1)),
                 const SizedBox(height: 10),
-                Text("No flashcards generated", style: TextStyle(color: Colors.white.withOpacity(0.3))),
+                Text("No cards yet", style: TextStyle(color: Colors.white.withOpacity(0.3))),
               ],
             ),
           );
@@ -434,7 +429,6 @@ class _GlassFlashcardsDeck extends StatelessWidget {
 
         return Column(
           children: [
-            // Progress Bar
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 10),
               child: ClipRRect(
@@ -447,8 +441,6 @@ class _GlassFlashcardsDeck extends StatelessWidget {
                 ),
               ),
             ),
-            
-            // Deck
             Expanded(
               child: PageView.builder(
                 controller: PageController(viewportFraction: 0.85),
@@ -500,6 +492,116 @@ class _GlassFlashcardsDeck extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/* ============================================================
+   MIND MAP VIEWER (FIXED)
+============================================================ */
+
+class _MindMapViewer extends StatefulWidget {
+  final dynamic mindMapData;
+  const _MindMapViewer({this.mindMapData});
+
+  @override
+  State<_MindMapViewer> createState() => _MindMapViewerState();
+}
+
+class _MindMapViewerState extends State<_MindMapViewer> {
+  final Graph _graph = Graph();
+  late BuchheimWalkerConfiguration _builder;
+
+  @override
+  void initState() {
+    super.initState();
+    _builder = BuchheimWalkerConfiguration()
+      ..siblingSeparation = 50
+      ..levelSeparation = 50
+      ..subtreeSeparation = 50
+      ..orientation = BuchheimWalkerConfiguration.ORIENTATION_TOP_BOTTOM;
+    _buildGraph();
+  }
+
+  void _buildGraph() {
+    if (widget.mindMapData == null) return;
+    
+    // We use a counter to ensure every node has a unique ID, 
+    // even if the text label is the same.
+    int nodeIdCounter = 0;
+
+    void parseNode(dynamic data, Node? parent) {
+      // Create a unique object for this node
+      // We store the label inside this map
+      final nodeId = {"id": nodeIdCounter++, "label": data['label']};
+      final node = Node.Id(nodeId);
+
+      if (parent != null) {
+        _graph.addEdge(parent, node);
+      } else {
+        _graph.addNode(node);
+      }
+
+      if (data['children'] != null) {
+        for (var child in data['children']) {
+          parseNode(child, node);
+        }
+      }
+    }
+
+    parseNode(widget.mindMapData, null);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.mindMapData == null || (widget.mindMapData as Map).isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.account_tree_outlined, size: 60, color: Colors.white.withOpacity(0.1)),
+            const SizedBox(height: 16),
+            Text("No Mind Map Available", style: TextStyle(color: Colors.white.withOpacity(0.3))),
+          ],
+        ),
+      );
+    }
+
+    return InteractiveViewer(
+      constrained: false, 
+      boundaryMargin: const EdgeInsets.all(100),
+      minScale: 0.01, 
+      maxScale: 5.0,
+      child: GraphView(
+        graph: _graph,
+        algorithm: BuchheimWalkerAlgorithm(_builder, TreeEdgeRenderer(_builder)),
+        paint: Paint()..color = Colors.white54..strokeWidth = 1.5..style = PaintingStyle.stroke,
+        builder: (Node node) {
+          // Extract the label from our unique object
+          final nodeValue = node.key?.value as Map<String, dynamic>?;
+          final String label = nodeValue?['label'] ?? "Node";
+          
+          bool isRoot = label == widget.mindMapData['label'];
+          
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: isRoot ? AppTheme.primaryBlue : const Color(0xFF1E293B),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: isRoot ? Colors.transparent : Colors.white24),
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 10)],
+            ),
+            child: Text(
+              label, 
+              style: TextStyle(
+                color: Colors.white, 
+                fontWeight: FontWeight.bold,
+                fontSize: isRoot ? 16 : 14
+              )
+            ),
+          );
+        },
       ),
     );
   }

@@ -2,7 +2,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../theme/app_theme.dart';
-import 'note_details_page.dart'; // Ensure this import exists
+import 'note_details_page.dart'; 
 
 class NotesView extends StatefulWidget {
   const NotesView({super.key});
@@ -27,17 +27,17 @@ class _NotesViewState extends State<NotesView> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF101922), // HTML 'bg-[#101922]'
+      backgroundColor: const Color(0xFF101922),
       body: Stack(
         children: [
           // 1. BACKGROUND GRADIENTS (The "Lumen" Glow)
           Positioned(
             top: -100, left: -100,
-            child: _buildOrb(400, const Color(0xFF2B8CEE).withOpacity(0.15)), // Primary Blue
+            child: _buildOrb(400, const Color(0xFF2B8CEE).withOpacity(0.15)), 
           ),
           Positioned(
             bottom: 100, right: -100,
-            child: _buildOrb(300, const Color(0xFF2B8CEE).withOpacity(0.08)), // Subtle Glow
+            child: _buildOrb(300, const Color(0xFF2B8CEE).withOpacity(0.08)), 
           ),
 
           // 2. MAIN CONTENT
@@ -67,16 +67,21 @@ class _NotesViewState extends State<NotesView> {
                       }
 
                       var notes = snapshot.data!;
-                      // Filter Logic
+                      
+                      // Client-side Search Logic
                       if (_searchQuery.isNotEmpty) {
                         notes = notes.where((n) => n['title'].toString().toLowerCase().contains(_searchQuery)).toList();
                       }
-                      // (Add Favorite/AI logic here later based on your DB columns)
+                      
+                      // Filter Logic (Example)
+                      if (_selectedFilterIndex == 2) { // AI Summaries
+                         notes = notes.where((n) => n['status'] == 'Done').toList();
+                      }
 
                       if (notes.isEmpty) return _buildEmptyState();
 
                       return ListView.builder(
-                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 120), // Bottom pad for Nav/FAB
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 100), // Padding for FAB
                         physics: const BouncingScrollPhysics(),
                         itemCount: notes.length,
                         itemBuilder: (context, index) => _buildNoteCard(notes[index]),
@@ -89,15 +94,10 @@ class _NotesViewState extends State<NotesView> {
           ),
 
           // 3. FLOATING ACTION BUTTON
+          // (Aligned to fit above the HomePage BottomBar)
           Positioned(
-            bottom: 100, right: 16,
+            bottom: 20, right: 16,
             child: _buildFAB(),
-          ),
-
-          // 4. BOTTOM NAV (Reusing the design from Profile/Dashboard)
-          Positioned(
-            bottom: 0, left: 0, right: 0,
-            child: _buildBottomNav(),
           ),
         ],
       ),
@@ -116,8 +116,9 @@ class _NotesViewState extends State<NotesView> {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               border: Border.all(color: const Color(0xFF2B8CEE).withOpacity(0.2), width: 2),
-              image: const DecorationImage(image: NetworkImage("https://i.pravatar.cc/150?img=12"), fit: BoxFit.cover),
+              color: Colors.white10,
             ),
+            child: const Icon(Icons.person, color: Colors.white), // Placeholder Avatar
           ),
           const Expanded(
             child: Text(
@@ -143,7 +144,7 @@ class _NotesViewState extends State<NotesView> {
     return Container(
       height: 50,
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.2), // .glass-input
+        color: Colors.black.withOpacity(0.2), 
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.white.withOpacity(0.05)),
       ),
@@ -158,18 +159,10 @@ class _NotesViewState extends State<NotesView> {
               onChanged: (val) => setState(() => _searchQuery = val.toLowerCase()),
               decoration: const InputDecoration(
                 hintText: "Search concepts...",
-                hintStyle: TextStyle(color: Color(0xFF9DABB9)), // Muted text
+                hintStyle: TextStyle(color: Color(0xFF9DABB9)), 
                 border: InputBorder.none,
               ),
             ),
-          ),
-          Container(
-            width: 50,
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.05),
-              border: Border(left: BorderSide(color: Colors.white.withOpacity(0.05))),
-            ),
-            child: const Icon(Icons.tune, color: Color(0xFF2B8CEE), size: 20),
           ),
         ],
       ),
@@ -198,21 +191,13 @@ class _NotesViewState extends State<NotesView> {
                 border: Border.all(color: isSelected ? Colors.transparent : Colors.white.withOpacity(0.08)),
                 boxShadow: isSelected ? [BoxShadow(color: const Color(0xFF2B8CEE).withOpacity(0.2), blurRadius: 10)] : [],
               ),
-              child: Row(
-                children: [
-                  if (filters[index] == "AI Summaries") ...[
-                    Icon(Icons.auto_awesome, size: 16, color: isSelected ? Colors.white : const Color(0xFF2B8CEE)),
-                    const SizedBox(width: 6),
-                  ],
-                  Text(
-                    filters[index],
-                    style: TextStyle(
-                      color: isSelected ? Colors.white : Colors.white.withOpacity(0.8),
-                      fontSize: 14,
-                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                    ),
-                  ),
-                ],
+              child: Text(
+                filters[index],
+                style: TextStyle(
+                  color: isSelected ? Colors.white : Colors.white.withOpacity(0.8),
+                  fontSize: 14,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                ),
               ),
             ),
           );
@@ -222,19 +207,25 @@ class _NotesViewState extends State<NotesView> {
   }
 
   Widget _buildNoteCard(Map<String, dynamic> note) {
-    // Generate styles based on ID (to mimic your HTML variety)
+    // Generate styles based on ID
     final colors = [Colors.blue, Colors.orange, Colors.teal, Colors.pink];
     final icons = [Icons.code, Icons.history_edu, Icons.biotech, Icons.functions];
     final color = colors[note['id'] % colors.length];
     final icon = icons[note['id'] % icons.length];
 
     return GestureDetector(
-      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => NoteDetailsPage(noteId: note['id'], title: note['title']))),
+      // --- CRITICAL FIX: Pass the full 'note' object, not just ID/Title ---
+      onTap: () => Navigator.push(
+        context, 
+        MaterialPageRoute(
+          builder: (_) => NoteDetailsPage(note: note) 
+        )
+      ),
       child: Container(
         margin: const EdgeInsets.only(bottom: 16),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.03), // .glass-panel
+          color: Colors.white.withOpacity(0.03), 
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: Colors.white.withOpacity(0.08)),
         ),
@@ -275,12 +266,12 @@ class _NotesViewState extends State<NotesView> {
                     children: [
                       _tag("Note", color),
                       const SizedBox(width: 6),
-                      if (note['status'] == 'Done') _tag("AI Summary", Colors.purpleAccent),
+                      if (note['status'] == 'Done') _tag("AI Ready", Colors.greenAccent),
                     ],
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    note['summary'] ?? "No summary available yet. Tap to generate one with AI.", // Fallback text
+                    note['summary'] ?? "Tap to generate summary...", 
                     style: const TextStyle(color: Color(0xFF9DABB9), fontSize: 14, height: 1.5),
                     maxLines: 2, overflow: TextOverflow.ellipsis,
                   ),
@@ -306,14 +297,14 @@ class _NotesViewState extends State<NotesView> {
   }
 
   Widget _buildFAB() {
-    return Container(
-      width: 56, height: 56,
-      decoration: BoxDecoration(
-        color: const Color(0xFF2B8CEE),
-        shape: BoxShape.circle,
-        boxShadow: [BoxShadow(color: const Color(0xFF2B8CEE).withOpacity(0.5), blurRadius: 20)], // .fab-glow
-      ),
-      child: const Icon(Icons.add, color: Colors.white, size: 28),
+    return FloatingActionButton(
+      backgroundColor: const Color(0xFF2B8CEE),
+      // Link to Record Page or Upload
+      onPressed: () {
+        // You can link this to your RecordPage
+        Navigator.pushNamed(context, '/record'); 
+      },
+      child: const Icon(Icons.add, color: Colors.white),
     );
   }
 
@@ -337,55 +328,6 @@ class _NotesViewState extends State<NotesView> {
           Text("No notes found", style: TextStyle(color: Colors.white.withOpacity(0.3))),
         ],
       ),
-    );
-  }
-
-  Widget _buildBottomNav() {
-    return ClipRRect(
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-        child: Container(
-          height: 85,
-          decoration: BoxDecoration(
-            color: const Color(0xFF101922).withOpacity(0.8), // Glass Nav Background
-            border: Border(top: BorderSide(color: Colors.white.withOpacity(0.1))),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _navItem(Icons.home_outlined, "Home", false),
-              _navItem(Icons.description, "Notes", true), // Active State
-              const SizedBox(width: 40), // Gap
-              _navItem(Icons.folder_open, "Library", false),
-              _navItem(Icons.person_outline, "Profile", false),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _navItem(IconData icon, String label, bool isActive) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Icon(icon, color: isActive ? const Color(0xFF2B8CEE) : Colors.white54, size: 26),
-            if (isActive)
-              Positioned(
-                top: -2, right: -2,
-                child: Container(width: 6, height: 6, decoration: const BoxDecoration(color: Color(0xFF2B8CEE), shape: BoxShape.circle)),
-              ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: TextStyle(color: isActive ? const Color(0xFF2B8CEE) : Colors.white54, fontSize: 10, fontWeight: FontWeight.w500),
-        ),
-      ],
     );
   }
 }

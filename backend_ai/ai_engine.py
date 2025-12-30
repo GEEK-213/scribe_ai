@@ -20,9 +20,9 @@ if not GEMINI_KEY:
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel("gemini-2.5-flash-lite") 
+model = genai.GenerativeModel("gemini-2.5-flash") 
 
-print("🟢 AI Engine V4 (Parallel Chat + Retry) is Ready...")
+print("🟢 Lumen AI Engine V5 (Mind Maps + Speakers) is Ready...")
 
 # --- HELPER FUNCTIONS ---
 def extract_text_from_pdf(file_path):
@@ -42,16 +42,17 @@ def clean_and_parse_json(raw_text):
         return json.loads(text)
     except:
         try:
-            match = re.search(r'\[.*\]', text, re.DOTALL)
+            # Try to find the first JSON-like structure (Array or Object)
+            match = re.search(r'(\{.*\}|\[.*\])', text, re.DOTALL)
             if match: return json.loads(match.group())
         except: pass
     return []
 
 # --- CORE PROCESSES ---
 async def process_new_uploads():
-    """Handles heavy file processing."""
+    """Handles heavy file processing with Mind Map & Speaker logic."""
     response = supabase.table('notes').select("*").eq('status', 'Processing').execute()
-    if not response.data: return # Don't print if empty to keep console clean
+    if not response.data: return
 
     for note in response.data:
         print(f"📄 Processing Upload: {note['audio_path']}") 
@@ -71,30 +72,41 @@ async def process_new_uploads():
             # 2. Prepare Gemini Input
             gemini_inputs = []
             
+            # --- UPDATED PROMPT FOR V5 ---
             prompt = """
             You are an expert academic tutor. Analyze the provided content.
-            1. TRANSCRIPT: Convert audio to text OR format the document text.
+            
+            1. TRANSCRIPT: Convert audio to text. IMPORTANT: Label speakers as "Speaker A:", "Speaker B:" if multiple voices are heard.
             2. SUMMARY: Create a concise bullet-point summary.
             3. QUIZ: Generate 5 multiple-choice questions.
             4. FLASHCARDS: Identify 5-10 key terms and their definitions.
             5. TASKS: Extract any homework/deadlines (e.g. "Assignment due Friday").
+            6. MIND_MAP: Generate a hierarchical JSON tree representing the topic structure.
 
             Output format (Strict JSON blocks):
             TRANSCRIPT_START
-            [Text]
+            [Transcript text with Speaker Labels]
             TRANSCRIPT_END
+            
             SUMMARY_START
-            [Text]
+            [Summary text]
             SUMMARY_END
+            
             QUIZ_START
             [{"question": "...", "options": ["A", "B"], "answer": "A"}]
             QUIZ_END
+            
             FLASHCARDS_START
             [{"front": "Term", "back": "Definition"}]
             FLASHCARDS_END
+            
             TASKS_START
             [{"title": "Task", "due_date": "2025-01-01"}]
             TASKS_END
+
+            MIND_MAP_START
+            {"id": "root", "label": "Main Topic", "children": [{"id": "1", "label": "Subtopic", "children": []}]}
+            MIND_MAP_END
             """
 
             if ext in ['pdf', 'txt']:
@@ -120,32 +132,36 @@ async def process_new_uploads():
                         await asyncio.sleep(20)
                     else: raise e
 
-            # 4. Parse & Save
-            # (Parsing logic shortened for brevity - same as V5)
-            try: transcript = text.split("TRANSCRIPT_START")[1].split("TRANSCRIPT_END")[0].strip()
-            except: transcript = "Error parsing transcript."
+            # 4. Parse Data
+            def extract_block(tag_start, tag_end):
+                try: return text.split(tag_start)[1].split(tag_end)[0].strip()
+                except: return None
+
+            transcript = extract_block("TRANSCRIPT_START", "TRANSCRIPT_END") or "No transcript."
+            summary = extract_block("SUMMARY_START", "SUMMARY_END") or "No summary."
+
+            q_json = clean_and_parse_json(extract_block("QUIZ_START", "QUIZ_END"))
+            f_json = clean_and_parse_json(extract_block("FLASHCARDS_START", "FLASHCARDS_END"))
+            t_json = clean_and_parse_json(extract_block("TASKS_START", "TASKS_END"))
             
-            try: summary = text.split("SUMMARY_START")[1].split("SUMMARY_END")[0].strip()
-            except: summary = "Error parsing summary."
+            # NEW: Mind Map Parsing
+            mm_json = clean_and_parse_json(extract_block("MIND_MAP_START", "MIND_MAP_END"))
+            if not mm_json: mm_json = {} # Safe fallback
 
             # Save Sub-Data
-            if "QUIZ_START" in text:
-                q_json = clean_and_parse_json(text.split("QUIZ_START")[1].split("QUIZ_END")[0])
-            else: q_json = []
+            for c in f_json: supabase.table('flashcards').insert({'note_id': note['id'], 'front': c['front'], 'back': c['back']}).execute()
+            for t in t_json: supabase.table('study_tasks').insert({'user_id': note['user_id'], 'title': t['title'], 'due_date': t.get('due_date'), 'origin_note_id': note['id']}).execute()
 
-            if "FLASHCARDS_START" in text:
-                f_json = clean_and_parse_json(text.split("FLASHCARDS_START")[1].split("FLASHCARDS_END")[0])
-                for c in f_json: supabase.table('flashcards').insert({'note_id': note['id'], 'front': c['front'], 'back': c['back']}).execute()
-
-            if "TASKS_START" in text:
-                t_json = clean_and_parse_json(text.split("TASKS_START")[1].split("TASKS_END")[0])
-                for t in t_json: supabase.table('study_tasks').insert({'user_id': note['user_id'], 'title': t['title'], 'due_date': t.get('due_date'), 'origin_note_id': note['id']}).execute()
-
-            # Final Update
+            # Final Update (With Mind Map!)
             supabase.table('notes').update({
-                "transcript": transcript, "summary": summary, "quiz": q_json, "status": "Done"
+                "transcript": transcript, 
+                "summary": summary, 
+                "quiz": q_json, 
+                "mind_map": mm_json, # <--- The New Feature
+                "status": "Done"
             }).eq("id", note['id']).execute()
-            print("   ✅ Upload Processed!")
+            
+            print("   ✅ Upload Processed (with Mind Map)!")
 
         except Exception as e:
             print(f"   ❌ Upload Error: {e}")
@@ -155,7 +171,7 @@ async def process_new_uploads():
             if os.path.exists(temp_filename): os.remove(temp_filename)
 
 async def process_chat_queue():
-    """Handles chat messages quickly."""
+    """Handles chat messages."""
     response = supabase.table('chat_messages').select("*").is_('response', 'null').execute()
     if not response.data: return
 
@@ -165,14 +181,12 @@ async def process_chat_queue():
         try:
             # 1. Get Context
             note = supabase.table('notes').select("transcript").eq("id", msg['note_id']).single().execute()
-            if not note.data: 
-                print("   ⚠️ Note not found for chat.")
-                continue
+            if not note.data: continue
             
             transcript = note.data['transcript']
             prompt = f"Context: {transcript[:15000]}\nStudent Question: {msg['question']}\n\nAnswer cleanly and concisely:"
 
-            # 2. Generate Answer (With Retry!)
+            # 2. Generate Answer
             answer = ""
             for attempt in range(3):
                 try:
@@ -181,11 +195,10 @@ async def process_chat_queue():
                     break
                 except Exception as e:
                     if "429" in str(e):
-                        print(f"   ⏳ Chat Rate Limit. Waiting 5s... (Attempt {attempt+1}/3)")
                         await asyncio.sleep(5)
                     else: raise e
             
-            if not answer: answer = "I'm having trouble connecting to the AI right now. Please try again."
+            if not answer: answer = "I'm having trouble connecting to the AI right now."
 
             # 3. Send Answer
             supabase.table('chat_messages').update({"response": answer}).eq("id", msg['id']).execute()
@@ -197,12 +210,8 @@ async def process_chat_queue():
 # --- MAIN LOOP ---
 async def main_loop():
     while True:
-        # Run BOTH tasks at the same time (Parallel)
-        await asyncio.gather(
-            process_new_uploads(),
-            process_chat_queue()
-        )
-        await asyncio.sleep(1) # Fast tick for responsiveness
+        await asyncio.gather(process_new_uploads(), process_chat_queue())
+        await asyncio.sleep(1)
 
 if __name__ == "__main__":
     asyncio.run(main_loop())

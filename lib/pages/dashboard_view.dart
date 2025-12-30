@@ -99,19 +99,18 @@ class _DashboardViewState extends State<DashboardView> {
   // --- MAIN UI ---
   @override
   Widget build(BuildContext context) {
-    // 1. REMOVE SCAFFOLD: We use a Container/Stack because HomePage already has the Scaffold
     return Container(
       color: AppTheme.backgroundDark,
       child: Stack(
         children: [
-          // A. BACKGROUND ORBS (Ambient Glow)
+          // A. BACKGROUND ORBS
           Positioned(
             top: -100, left: -100,
-            child: _buildOrb(300, const Color(0xFF2B8CEE).withOpacity(0.4)), // Primary Blue
+            child: _buildOrb(300, const Color(0xFF2B8CEE).withOpacity(0.4)),
           ),
           Positioned(
             bottom: 100, right: -100,
-            child: _buildOrb(400, const Color(0xFF4AA3FF).withOpacity(0.2)), // Light Blue
+            child: _buildOrb(400, const Color(0xFF4AA3FF).withOpacity(0.2)),
           ),
 
           // B. MAIN SCROLL VIEW
@@ -164,16 +163,14 @@ class _DashboardViewState extends State<DashboardView> {
                   },
                 ),
 
-                // Spacer at bottom so content isn't hidden by Floating Button
                 const SliverPadding(padding: EdgeInsets.only(bottom: 100)),
               ],
             ),
           ),
 
           // C. FLOATING ACTION BUTTON (Mic)
-          
           Positioned(
-            bottom: 20, // Adjusted to sit just above the Main Bottom Bar
+            bottom: 20, 
             right: 24,
             child: GestureDetector(
               onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RecordPage())),
@@ -189,9 +186,6 @@ class _DashboardViewState extends State<DashboardView> {
               ),
             ),
           ),
-
-          // 4. REMOVED GLASS NAVBAR
-          // The navbar is now handled by home_page.dart
         ],
       ),
     );
@@ -224,7 +218,6 @@ class _DashboardViewState extends State<DashboardView> {
         children: [
           Row(
             children: [
-              // Profile Placeholder
               Stack(
                 children: [
                   Container(
@@ -260,7 +253,7 @@ class _DashboardViewState extends State<DashboardView> {
             ],
           ),
           IconButton(
-             onPressed: _pickAndUploadFile, // Quick Upload Access
+             onPressed: _pickAndUploadFile, 
              icon: const Icon(Icons.cloud_upload_outlined, color: Colors.white),
           ),
         ],
@@ -402,7 +395,6 @@ class _DashboardViewState extends State<DashboardView> {
 
   Widget _buildLectureCard(Map<String, dynamic> note) {
     final isDone = note['status'] == 'Done';
-    // Gradients for variety
     final gradients = [
       [Colors.purpleAccent, Colors.deepPurple],
       [Colors.orangeAccent, Colors.redAccent],
@@ -411,7 +403,13 @@ class _DashboardViewState extends State<DashboardView> {
     final grad = gradients[note['id'] % gradients.length];
 
     return GestureDetector(
-      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => NoteDetailsPage(noteId: note['id'], title: note['title']))),
+      // --- THE FIX IS HERE ---
+      // We now pass the FULL 'note' object, not just 'noteId'
+      onTap: () => Navigator.push(
+        context, 
+        MaterialPageRoute(builder: (_) => NoteDetailsPage(note: note))
+      ),
+      // -----------------------
       child: Container(
         margin: const EdgeInsets.fromLTRB(24, 0, 24, 16),
         padding: const EdgeInsets.all(16),
@@ -422,7 +420,6 @@ class _DashboardViewState extends State<DashboardView> {
         ),
         child: Row(
           children: [
-            // Icon Container
             Container(
               width: 56, height: 56,
               decoration: BoxDecoration(
@@ -433,7 +430,6 @@ class _DashboardViewState extends State<DashboardView> {
               child: const Icon(Icons.science, color: Colors.white, size: 28),
             ),
             const SizedBox(width: 16),
-            // Info
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -450,7 +446,6 @@ class _DashboardViewState extends State<DashboardView> {
                 ],
               ),
             ),
-            // Status Tag
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
