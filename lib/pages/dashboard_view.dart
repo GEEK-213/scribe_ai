@@ -171,7 +171,7 @@ class _DashboardViewState extends State<DashboardView> {
           ),
 
           // C. FLOATING ACTION BUTTON (Mic)
-          // We keep this Positioned because it floats over the content
+          
           Positioned(
             bottom: 20, // Adjusted to sit just above the Main Bottom Bar
             right: 24,
