@@ -167,12 +167,14 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> with SingleTickerProv
                     physics: const NeverScrollableScrollPhysics(), // Disable swipe for Mind Map
                     children: [
                       // 1. Summary (Selectable)
+                      // --- FIX: Using _SelectableMarkdown to enable context menu ---
                       _SelectableMarkdown(
                         text: widget.note['summary'] ?? "Generating summary...",
                         onExplain: (text) => _showDefinitionDialog(context, text),
                       ),
                       
                       // 2. Transcript (Selectable)
+                      // --- FIX: Using _SelectableMarkdown to enable context menu ---
                       _SelectableMarkdown(
                         text: transcript,
                         onExplain: (text) => _showDefinitionDialog(context, text),
@@ -261,19 +263,23 @@ class _SelectableMarkdown extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // SelectionArea enables the "Select" menu
     return SelectionArea(
       contextMenuBuilder: (context, editableTextState) {
         return AdaptiveTextSelectionToolbar.buttonItems(
           anchors: editableTextState.contextMenuAnchors,
           buttonItems: [
             ...editableTextState.contextMenuButtonItems,
+            // ADD OUR CUSTOM BUTTON
             ContextMenuButtonItem(
               onPressed: () {
                 final selectedText = editableTextState.textEditingValue.selection.textInside(editableTextState.textEditingValue.text);
+                // Close menu
                 editableTextState.hideToolbar();
+                // Trigger action
                 onExplain(selectedText);
               },
-              label: 'Explain AI', 
+              label: 'Explain AI', // The button name
             ),
           ],
         );
@@ -310,6 +316,7 @@ class _DefinitionDialogState extends State<_DefinitionDialog> {
     try {
       final userId = Supabase.instance.client.auth.currentUser?.id;
       
+      // 1. Send question to DB (Triggers Python AI)
       final response = await Supabase.instance.client.from('chat_messages').insert({
         'user_id': userId,
         'note_id': widget.noteId,
@@ -319,6 +326,7 @@ class _DefinitionDialogState extends State<_DefinitionDialog> {
 
       final messageId = response['id'];
 
+      // 2. Listen for the answer
       Supabase.instance.client
           .from('chat_messages')
           .stream(primaryKey: ['id'])
@@ -515,7 +523,7 @@ class _GlassMarkdownCard extends StatelessWidget {
             ),
             child: MarkdownBody(
               data: text,
-              selectable: true,
+              selectable: true, // IMPORTANT: Must be true for selection to work
               styleSheet: MarkdownStyleSheet(
                 p: const TextStyle(fontSize: 16, height: 1.6, color: Colors.white70),
                 h1: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
@@ -668,6 +676,7 @@ class _MindMapViewerState extends State<_MindMapViewer> {
   void _buildGraph() {
     if (widget.mindMapData == null) return;
     
+    // Unique ID Counter to fix layout crashes (NaN Error)
     int nodeIdCounter = 0;
 
     void parseNode(dynamic data, Node? parent) {
