@@ -5,14 +5,13 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flip_card/flip_card.dart';
-import 'package:graphview/GraphView.dart'; // Ensure you have: flutter pub add graphview
+import 'package:graphview/GraphView.dart'; 
 
 import '../theme/app_theme.dart';
 import 'chat_screen.dart';
 import 'quiz_view.dart';
 
 class NoteDetailsPage extends StatefulWidget {
-  // FIXED: Now accepts the full note object to match NotesView
   final Map<String, dynamic> note;
 
   const NoteDetailsPage({
@@ -36,7 +35,6 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> with SingleTickerProv
   @override
   void initState() {
     super.initState();
-    // NOW 5 TABS: Summary, Transcript, Quiz, Cards, Mind Map
     _tabController = TabController(length: 5, vsync: this);
 
     _audioPlayer.onPlayerStateChanged.listen((state) {
@@ -100,7 +98,6 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> with SingleTickerProv
 
   @override
   Widget build(BuildContext context) {
-    // Process Transcript to make Speakers Bold & Blue
     String transcript = (widget.note['transcript'] ?? "Generating transcript...")
         .replaceAllMapped(
             RegExp(r'(Speaker [A-Z0-9]+:)'), 
@@ -108,7 +105,7 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> with SingleTickerProv
         );
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0F172A), // Lumen Dark Background
+      backgroundColor: const Color(0xFF0F172A),
       extendBodyBehindAppBar: true,
       appBar: _buildGlassAppBar(),
       body: Stack(
@@ -152,7 +149,9 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> with SingleTickerProv
                 Expanded(
                   child: TabBarView(
                     controller: _tabController,
-                    physics: const BouncingScrollPhysics(),
+                    // --- KEY FIX: DISABLE SWIPING ---
+                    // This gives the Mind Map full control over touch gestures!
+                    physics: const NeverScrollableScrollPhysics(), 
                     children: [
                       // 1. Summary
                       _GlassMarkdownCard(text: widget.note['summary'] ?? "Generating summary..."),
@@ -172,7 +171,7 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> with SingleTickerProv
                         onIndexChanged: (i) => setState(() => _currentCardIndex = i),
                       ),
 
-                      // 5. MIND MAP (New!)
+                      // 5. MIND MAP
                       _MindMapViewer(mindMapData: widget.note['mind_map']),
                     ],
                   ),
@@ -233,8 +232,114 @@ class _NoteDetailsPageState extends State<NoteDetailsPage> with SingleTickerProv
 }
 
 /* ============================================================
-   GLASS AUDIO PLAYER
+   MIND MAP VIEWER (IMPROVED VISIBILITY)
 ============================================================ */
+class _MindMapViewer extends StatefulWidget {
+  final dynamic mindMapData;
+  const _MindMapViewer({this.mindMapData});
+
+  @override
+  State<_MindMapViewer> createState() => _MindMapViewerState();
+}
+
+class _MindMapViewerState extends State<_MindMapViewer> {
+  final Graph _graph = Graph();
+  late BuchheimWalkerConfiguration _builder;
+
+  @override
+  void initState() {
+    super.initState();
+    _builder = BuchheimWalkerConfiguration()
+      ..siblingSeparation = 50
+      ..levelSeparation = 50
+      ..subtreeSeparation = 50
+      ..orientation = BuchheimWalkerConfiguration.ORIENTATION_TOP_BOTTOM;
+    _buildGraph();
+  }
+
+  void _buildGraph() {
+    if (widget.mindMapData == null) return;
+    
+    // Unique ID Counter to fix layout crashes (NaN Error)
+    int nodeIdCounter = 0;
+
+    void parseNode(dynamic data, Node? parent) {
+      final nodeId = {"id": nodeIdCounter++, "label": data['label']};
+      final node = Node.Id(nodeId);
+
+      if (parent != null) {
+        _graph.addEdge(parent, node);
+      } else {
+        _graph.addNode(node);
+      }
+
+      if (data['children'] != null) {
+        for (var child in data['children']) {
+          parseNode(child, node);
+        }
+      }
+    }
+
+    parseNode(widget.mindMapData, null);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.mindMapData == null || (widget.mindMapData as Map).isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.account_tree_outlined, size: 60, color: Colors.white.withOpacity(0.1)),
+            const SizedBox(height: 16),
+            Text("No Mind Map Available", style: TextStyle(color: Colors.white.withOpacity(0.3))),
+          ],
+        ),
+      );
+    }
+
+    return InteractiveViewer(
+      constrained: false, 
+      // --- VISIBILITY FIX: HUGE MARGIN ---
+      // This allows you to scroll WAY past the screen edges to see large maps
+      boundaryMargin: const EdgeInsets.all(2000), 
+      minScale: 0.01, 
+      maxScale: 5.0,
+      child: GraphView(
+        graph: _graph,
+        algorithm: BuchheimWalkerAlgorithm(_builder, TreeEdgeRenderer(_builder)),
+        paint: Paint()..color = Colors.white54..strokeWidth = 1.5..style = PaintingStyle.stroke,
+        builder: (Node node) {
+          final nodeValue = node.key?.value as Map<String, dynamic>?;
+          final String label = nodeValue?['label'] ?? "Node";
+          
+          bool isRoot = label == widget.mindMapData['label'];
+          
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: isRoot ? AppTheme.primaryBlue : const Color(0xFF1E293B),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: isRoot ? Colors.transparent : Colors.white24),
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 10)],
+            ),
+            child: Text(
+              label, 
+              style: TextStyle(
+                color: Colors.white, 
+                fontWeight: FontWeight.bold,
+                fontSize: isRoot ? 16 : 14
+              )
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// --- SUB-WIDGETS ---
+
 class _GlassAudioPlayer extends StatelessWidget {
   final bool isPlaying;
   final Duration position;
@@ -309,9 +414,6 @@ class _GlassAudioPlayer extends StatelessWidget {
   }
 }
 
-/* ============================================================
-   GLASS TAB SELECTOR
-============================================================ */
 class _GlassTabSelector extends StatelessWidget {
   final TabController controller;
   const _GlassTabSelector({required this.controller});
@@ -341,16 +443,13 @@ class _GlassTabSelector extends StatelessWidget {
           Tab(text: "Text"),
           Tab(text: "Quiz"),
           Tab(text: "Cards"),
-          Tab(text: "Mind Map"), // Added!
+          Tab(text: "Mind Map"),
         ],
       ),
     );
   }
 }
 
-/* ============================================================
-   GLASS MARKDOWN CARD
-============================================================ */
 class _GlassMarkdownCard extends StatelessWidget {
   final String text;
   const _GlassMarkdownCard({required this.text});
@@ -390,9 +489,6 @@ class _GlassMarkdownCard extends StatelessWidget {
   }
 }
 
-/* ============================================================
-   GLASS FLASHCARDS DECK
-============================================================ */
 class _GlassFlashcardsDeck extends StatelessWidget {
   final int noteId;
   final int currentIndex;
@@ -492,116 +588,6 @@ class _GlassFlashcardsDeck extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-/* ============================================================
-   MIND MAP VIEWER (FIXED)
-============================================================ */
-
-class _MindMapViewer extends StatefulWidget {
-  final dynamic mindMapData;
-  const _MindMapViewer({this.mindMapData});
-
-  @override
-  State<_MindMapViewer> createState() => _MindMapViewerState();
-}
-
-class _MindMapViewerState extends State<_MindMapViewer> {
-  final Graph _graph = Graph();
-  late BuchheimWalkerConfiguration _builder;
-
-  @override
-  void initState() {
-    super.initState();
-    _builder = BuchheimWalkerConfiguration()
-      ..siblingSeparation = 50
-      ..levelSeparation = 50
-      ..subtreeSeparation = 50
-      ..orientation = BuchheimWalkerConfiguration.ORIENTATION_TOP_BOTTOM;
-    _buildGraph();
-  }
-
-  void _buildGraph() {
-    if (widget.mindMapData == null) return;
-    
-    // We use a counter to ensure every node has a unique ID, 
-    // even if the text label is the same.
-    int nodeIdCounter = 0;
-
-    void parseNode(dynamic data, Node? parent) {
-      // Create a unique object for this node
-      // We store the label inside this map
-      final nodeId = {"id": nodeIdCounter++, "label": data['label']};
-      final node = Node.Id(nodeId);
-
-      if (parent != null) {
-        _graph.addEdge(parent, node);
-      } else {
-        _graph.addNode(node);
-      }
-
-      if (data['children'] != null) {
-        for (var child in data['children']) {
-          parseNode(child, node);
-        }
-      }
-    }
-
-    parseNode(widget.mindMapData, null);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (widget.mindMapData == null || (widget.mindMapData as Map).isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.account_tree_outlined, size: 60, color: Colors.white.withOpacity(0.1)),
-            const SizedBox(height: 16),
-            Text("No Mind Map Available", style: TextStyle(color: Colors.white.withOpacity(0.3))),
-          ],
-        ),
-      );
-    }
-
-    return InteractiveViewer(
-      constrained: false, 
-      boundaryMargin: const EdgeInsets.all(100),
-      minScale: 0.01, 
-      maxScale: 5.0,
-      child: GraphView(
-        graph: _graph,
-        algorithm: BuchheimWalkerAlgorithm(_builder, TreeEdgeRenderer(_builder)),
-        paint: Paint()..color = Colors.white54..strokeWidth = 1.5..style = PaintingStyle.stroke,
-        builder: (Node node) {
-          // Extract the label from our unique object
-          final nodeValue = node.key?.value as Map<String, dynamic>?;
-          final String label = nodeValue?['label'] ?? "Node";
-          
-          bool isRoot = label == widget.mindMapData['label'];
-          
-          return Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: BoxDecoration(
-              color: isRoot ? AppTheme.primaryBlue : const Color(0xFF1E293B),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: isRoot ? Colors.transparent : Colors.white24),
-              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 10)],
-            ),
-            child: Text(
-              label, 
-              style: TextStyle(
-                color: Colors.white, 
-                fontWeight: FontWeight.bold,
-                fontSize: isRoot ? 16 : 14
-              )
-            ),
-          );
-        },
       ),
     );
   }
